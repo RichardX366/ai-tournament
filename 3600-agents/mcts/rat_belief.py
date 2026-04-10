@@ -23,16 +23,15 @@ INDEXING CONVENTION (matches the engine)
     (x, y)     = (index % BOARD_SIZE, index // BOARD_SIZE)
 """
 
-import jax
 import jax.numpy as jnp
 from typing import Tuple
 
 # ── constants (mirrored from enums.py / rat.py) ───────────────────────────────
 BOARD_SIZE = 8
-N          = BOARD_SIZE * BOARD_SIZE  # 64
+N = BOARD_SIZE * BOARD_SIZE  # 64
 
-RAT_BONUS   =  4   # points for a correct search
-RAT_PENALTY = -2   # points for a wrong search
+RAT_BONUS = 4  # points for a correct search
+RAT_PENALTY = -2  # points for a wrong search
 
 # ── module-level JAX constants (created once at import, never rebuilt) ────────
 
@@ -40,31 +39,37 @@ RAT_PENALTY = -2   # points for a wrong search
 # Rows → Cell type  : SPACE=0, PRIMED=1, CARPET=2, BLOCKED=3  (matches Cell enum)
 # Cols → Noise type : SQUEAK=0, SCRATCH=1, SQUEAL=2           (matches Noise enum)
 #                             SQK    SCR    SQL
-_EMISSION = jnp.array([
-    [0.70, 0.15, 0.15],   # SPACE
-    [0.10, 0.80, 0.10],   # PRIMED
-    [0.10, 0.10, 0.80],   # CARPET
-    [0.50, 0.30, 0.20],   # BLOCKED
-], dtype=jnp.float32)     # shape (4, 3)
+_EMISSION = jnp.array(
+    [
+        [0.70, 0.15, 0.15],  # SPACE
+        [0.10, 0.80, 0.10],  # PRIMED
+        [0.10, 0.10, 0.80],  # CARPET
+        [0.50, 0.30, 0.20],  # BLOCKED
+    ],
+    dtype=jnp.float32,
+)  # shape (4, 3)
 
 # Distance error model: d_obs = clamp(d_true + offset, 0)
 # P(offset = -1) = 0.12,  P(0) = 0.70,  P(+1) = 0.12,  P(+2) = 0.06
-_DIST_OFFSETS = jnp.array([-1, 0, 1, 2], dtype=jnp.int32)              # shape (4,)
-_DIST_PROBS   = jnp.array([0.12, 0.70, 0.12, 0.06], dtype=jnp.float32) # shape (4,)
+_DIST_OFFSETS = jnp.array([-1, 0, 1, 2], dtype=jnp.int32)  # shape (4,)
+_DIST_PROBS = jnp.array([0.12, 0.70, 0.12, 0.06], dtype=jnp.float32)  # shape (4,)
 
 # (x, y) coordinates for every cell index — precomputed once
 _ALL_IDX = jnp.arange(N, dtype=jnp.int32)
-_ALL_X   = _ALL_IDX % BOARD_SIZE   # shape (64,)
-_ALL_Y   = _ALL_IDX // BOARD_SIZE  # shape (64,)
+_ALL_X = _ALL_IDX % BOARD_SIZE  # shape (64,)
+_ALL_Y = _ALL_IDX // BOARD_SIZE  # shape (64,)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def _xy_to_idx(x: int, y: int) -> int:
     return y * BOARD_SIZE + x
 
+
 def _idx_to_xy(idx: int) -> Tuple[int, int]:
     return (int(idx % BOARD_SIZE), int(idx // BOARD_SIZE))
+
 
 def _mask_to_bool_array(mask: int) -> jnp.ndarray:
     """
@@ -76,6 +81,7 @@ def _mask_to_bool_array(mask: int) -> jnp.ndarray:
 
 
 # ── main class ────────────────────────────────────────────────────────────────
+
 
 class RatBelief:
     """
@@ -105,10 +111,14 @@ class RatBelief:
 
         # Uniform prior — after 1000 headstart steps we have no information
         self.belief: jnp.ndarray = jnp.ones(N, dtype=jnp.float32) / N
-        self._spawn_prior        = self.belief  # reused on every respawn
+        self._spawn_prior = self.belief  # reused on every respawn
 
         # Flag set when a rat catch is detected; triggers reset on the next turn
         self._rat_was_caught = False
+
+        # Cache for _blocked_mask → JAX bool array (blocked cells rarely change)
+        self._cached_blocked_mask_val = None
+        self._cached_blocked_arr = None
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -124,42 +134,44 @@ class RatBelief:
         """
         # ── 0. Respawn reset (deferred one turn so the catch observation lands) ──
         if self._rat_was_caught:
-            self.belief          = self._spawn_prior
+            self.belief = self._spawn_prior
             self._rat_was_caught = False
 
         opp_loc, opp_hit = board.opponent_search
-        _,       my_hit  = board.player_search
+        _, my_hit = board.player_search
 
         if opp_hit or my_hit:
             # Rat was just caught — new rat spawned, reset to uniform prior
             self._rat_was_caught = True
-            self.belief          = self._spawn_prior
+            self.belief = self._spawn_prior
             return
 
         # ── 1. Zero out confirmed-miss cell from opponent's last search ──────
         if opp_loc is not None and not opp_hit:
-            idx         = _xy_to_idx(*opp_loc)
+            idx = _xy_to_idx(*opp_loc)
             self.belief = self.belief.at[idx].set(0.0)
-            s           = self.belief.sum()
+            s = self.belief.sum()
             self.belief = jnp.where(s > 0, self.belief / s, self._spawn_prior)
 
         # ── 2. Predict: rat moves once before making noise ───────────────────
         self.belief = self._T_T @ self.belief
 
         # ── 3. Likelihood from noise and distance observations ───────────────
-        cell_types = self._get_cell_types(board)                             # (64,) int32
-        noise_lik  = self._noise_likelihood(cell_types, int(noise))          # (64,)
-        dist_lik   = self._dist_likelihood(board.player_worker.get_location(), dist)  # (64,)
-        likelihood = noise_lik * dist_lik                                    # (64,)
+        cell_types = self._get_cell_types(board)  # (64,) int32
+        noise_lik = self._noise_likelihood(cell_types, int(noise))  # (64,)
+        dist_lik = self._dist_likelihood(
+            board.player_worker.get_location(), dist
+        )  # (64,)
+        likelihood = noise_lik * dist_lik  # (64,)
 
         # ── 4. Update and renormalise ────────────────────────────────────────
         self.belief = self.belief * likelihood
-        s           = self.belief.sum()
+        s = self.belief.sum()
         self.belief = jnp.where(s > 1e-12, self.belief / s, self._spawn_prior)
 
     def reset(self):
         """Manually reset to uniform prior (e.g. if you catch the rat yourself)."""
-        self.belief          = self._spawn_prior
+        self.belief = self._spawn_prior
         self._rat_was_caught = False
 
     def best_guess(self) -> Tuple[int, int]:
@@ -185,7 +197,7 @@ class RatBelief:
         Since EV = 6p-2 is monotone in p, this is just argmax of belief.
         """
         idx = int(jnp.argmax(self.belief))
-        xy  = _idx_to_xy(idx)
+        xy = _idx_to_xy(idx)
         return xy, self.ev_search(xy)
 
     def should_search(self, threshold: float = 0.0) -> bool:
@@ -205,15 +217,21 @@ class RatBelief:
         in Python (avoiding JAX int64 platform issues) then hand a bool array
         to JAX for the vectorised where() assignments.
         """
-        is_primed  = _mask_to_bool_array(board._primed_mask)   # (64,) bool
-        is_carpet  = _mask_to_bool_array(board._carpet_mask)   # (64,) bool
-        is_blocked = _mask_to_bool_array(board._blocked_mask)  # (64,) bool
+        is_primed = _mask_to_bool_array(board._primed_mask)  # (64,) bool
+        is_carpet = _mask_to_bool_array(board._carpet_mask)  # (64,) bool
+
+        # Cache blocked mask — it almost never changes
+        bm = board._blocked_mask
+        if bm != self._cached_blocked_mask_val:
+            self._cached_blocked_mask_val = bm
+            self._cached_blocked_arr = _mask_to_bool_array(bm)
+        is_blocked = self._cached_blocked_arr
 
         # Priority order matches board.get_cell(): PRIMED > CARPET > BLOCKED > SPACE
-        cell_types = jnp.zeros(N, dtype=jnp.int32)                       # SPACE=0
-        cell_types = jnp.where(is_blocked, jnp.int32(3), cell_types)     # BLOCKED=3
-        cell_types = jnp.where(is_carpet,  jnp.int32(2), cell_types)     # CARPET=2
-        cell_types = jnp.where(is_primed,  jnp.int32(1), cell_types)     # PRIMED=1
+        cell_types = jnp.zeros(N, dtype=jnp.int32)  # SPACE=0
+        cell_types = jnp.where(is_blocked, jnp.int32(3), cell_types)  # BLOCKED=3
+        cell_types = jnp.where(is_carpet, jnp.int32(2), cell_types)  # CARPET=2
+        cell_types = jnp.where(is_primed, jnp.int32(1), cell_types)  # PRIMED=1
 
         return cell_types  # shape (64,)
 
@@ -237,13 +255,12 @@ class RatBelief:
         Broadcast shape: offsets (4,1) over cells (1,64) → (4,64), then sum over offsets.
         """
         wx, wy = worker_xy
-        d_true = jnp.abs(_ALL_X - wx) + jnp.abs(_ALL_Y - wy)          # (64,)
+        d_true = jnp.abs(_ALL_X - wx) + jnp.abs(_ALL_Y - wy)  # (64,)
 
         # (4, 64): clamped expected observation for each offset × each cell
-        d_expected  = jnp.maximum(d_true[None, :] + _DIST_OFFSETS[:, None], 0)
-        matches     = (d_expected == d_obs).astype(jnp.float32)         # (4, 64)
-        likelihoods = (_DIST_PROBS[:, None] * matches).sum(axis=0)      # (64,)
+        d_expected = jnp.maximum(d_true[None, :] + _DIST_OFFSETS[:, None], 0)
+        matches = (d_expected == d_obs).astype(jnp.float32)  # (4, 64)
+        likelihoods = (_DIST_PROBS[:, None] * matches).sum(axis=0)  # (64,)
 
         # Epsilon floor keeps belief from collapsing to all-zeros on model mismatch
-        return jnp.maximum(likelihoods, 1e-9)                           # (64,)
-    
+        return jnp.maximum(likelihoods, 1e-9)  # (64,)

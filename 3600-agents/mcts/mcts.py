@@ -132,6 +132,8 @@ class MCTS:
         eval_fn: optional custom evaluation function(board) -> float in [-1, 1]
                  from the perspective of the *current* player_worker.
                  If None, uses the built-in heuristic.
+        rat_belief: optional RatBelief instance — if provided, the heuristic
+                    uses rat position probabilities to bonus cells near the rat.
     """
 
     def __init__(
@@ -139,11 +141,24 @@ class MCTS:
         exploration: float = 1.41,
         rollout_depth: int = 10,
         eval_fn=None,
+        rat_belief=None,
     ):
         self.exploration = exploration
         self.rollout_depth = rollout_depth
-        self.eval_fn = eval_fn or self._default_eval
+        self.rat_belief = rat_belief
+        self.eval_fn = eval_fn or self._make_eval(rat_belief)
         self._prev_root = None  # for tree reuse
+
+    def set_rat_belief(self, rat_belief):
+        """Update rat belief reference and rebuild eval fn."""
+        self.rat_belief = rat_belief
+        self.eval_fn = self._make_eval(rat_belief)
+
+    def _make_eval(self, rat_belief):
+        """Return an eval function closed over rat_belief."""
+        def eval_fn(board):
+            return MCTS._default_eval(board, rat_belief)
+        return eval_fn
 
     def search(self, board: Board, time_budget: float) -> Tuple[Optional[Move], float]:
         """
@@ -305,16 +320,17 @@ class MCTS:
         return random.choice(moves)
 
     @staticmethod
-    def _default_eval(board: Board) -> float:
+    def _default_eval(board: Board, rat_belief=None) -> float:
         """
         Evaluate board from the perspective of the current player_worker.
         Returns a value in [-1, 1].
 
-        Components:
-        - Point differential (dominant signal)
-        - Proximity-weighted primed cells: primed cells near the player
-          are carpet opportunities; primed cells near the opponent are threats.
-        - Turns remaining advantage
+        Components (all from player_worker's perspective):
+          1. Point differential — actual scored points
+          2. Carpet line potential — value of primed runs we can roll vs opponent
+          3. Priming opportunity — how many open axes we're adjacent to
+          4. Rat proximity bonus — being near the likely rat position is valuable
+          5. Turns remaining differential
         """
         if board.is_game_over():
             winner = board.get_winner()
@@ -332,43 +348,207 @@ class MCTS:
         my_pos = board.player_worker.get_location()
         opp_pos = board.opponent_worker.get_location()
         primed_mask = board._primed_mask
-        my_potential = 0.0
-        opp_potential = 0.0
+        blocked_mask = board._blocked_mask
+        carpet_mask  = board._carpet_mask
 
-        # Iterate only over set bits
-        mask = primed_mask
-        while mask:
-            # Isolate lowest set bit
-            bit = mask & (-mask)
-            mask ^= bit
-            idx = bit.bit_length() - 1
-            px = idx % BOARD_SIZE
-            py = idx // BOARD_SIZE
+        # ── 1. Carpet line potential ──────────────────────────────────────────
+        # For each axis (horizontal/vertical) scan primed runs and estimate
+        # who is closer to rolling them. A run of length n is worth
+        # CARPET_POINTS_TABLE[n] to whoever rolls it.
+        my_carpet_ev  = 0.0
+        opp_carpet_ev = 0.0
 
-            my_dist = abs(my_pos[0] - px) + abs(my_pos[1] - py)
-            opp_dist = abs(opp_pos[0] - px) + abs(opp_pos[1] - py)
+        for run_cells in _find_primed_runs(primed_mask, blocked_mask | carpet_mask):
+            n = len(run_cells)
+            if n < 1:
+                continue
+            pts = _table_lookup(n)
 
-            # Closer cells are worth more (inverse distance, capped)
-            # A primed cell right next to you is a carpet-2 opportunity (~2 pts)
-            if my_dist <= 1:
-                my_potential += 2.0
-            elif my_dist <= 3:
-                my_potential += 1.0
-            else:
-                my_potential += 0.3
+            # Closest endpoint of the run to each player
+            # (worker needs to be adjacent to one end to roll)
+            min_my_dist  = min(
+                abs(my_pos[0]  - cx) + abs(my_pos[1]  - cy)
+                for cx, cy in run_cells
+            )
+            min_opp_dist = min(
+                abs(opp_pos[0] - cx) + abs(opp_pos[1] - cy)
+                for cx, cy in run_cells
+            )
 
-            if opp_dist <= 1:
-                opp_potential += 2.0
-            elif opp_dist <= 3:
-                opp_potential += 1.0
-            else:
-                opp_potential += 0.3
+            # Discount by distance — farther away means less likely to roll it
+            # before the opponent or before the game ends
+            my_share  = 1.0 / (1.0 + min_my_dist)
+            opp_share = 1.0 / (1.0 + min_opp_dist)
+            total     = my_share + opp_share
 
-        # Net potential: our carpet opportunities minus opponent's
-        potential = my_potential - opp_potential
+            my_carpet_ev  += pts * (my_share  / total)
+            opp_carpet_ev += pts * (opp_share / total)
 
-        # Turns advantage (more turns = more opportunity to score)
+        carpet_advantage = my_carpet_ev - opp_carpet_ev
+
+        # ── 2. Priming opportunity — open axes adjacent to us ─────────────────
+        # An "open axis" is a direction from our current position where we
+        # could start building a prime run. Worth less than carpet potential
+        # but still signals board position quality.
+        my_prime_axes  = _count_open_axes(my_pos,  primed_mask, blocked_mask, carpet_mask)
+        opp_prime_axes = _count_open_axes(opp_pos, primed_mask, blocked_mask, carpet_mask)
+        prime_advantage = my_prime_axes - opp_prime_axes
+
+        # ── 3. Rat proximity bonus ────────────────────────────────────────────
+        # If we're close to where the rat probably is, we could search soon.
+        # Model this as: expected points if we searched right now minus
+        # expected points if opponent were at our position (opportunity cost).
+        rat_bonus = 0.0
+        if rat_belief is not None:
+            belief = rat_belief.belief
+            # EV of searching from current position = 6*p_best - 2
+            # But we also want to reward being physically close to the rat,
+            # since the distance signal gets better near the rat.
+            # Use a weighted sum of belief over cells near us.
+            my_x, my_y = my_pos
+            opp_x, opp_y = opp_pos
+
+            my_rat_weight  = 0.0
+            opp_rat_weight = 0.0
+
+            # Iterate set bits of belief's top mass
+            import jax.numpy as jnp
+            belief_np = belief  # jnp array, indexable
+
+            for idx in range(64):
+                p = float(belief_np[idx])
+                if p < 1e-4:
+                    continue
+                cx, cy = idx % 8, idx // 8
+                my_dist  = abs(my_x  - cx) + abs(my_y  - cy)
+                opp_dist = abs(opp_x - cx) + abs(opp_y - cy)
+                # Closer to rat = more valuable (weight by inverse distance)
+                my_rat_weight  += p / (1.0 + my_dist)
+                opp_rat_weight += p / (1.0 + opp_dist)
+
+            rat_bonus = (my_rat_weight - opp_rat_weight) * 4.0  # scale to point units
+
+        # ── 4. Turns remaining ────────────────────────────────────────────────
         turn_diff = board.player_worker.turns_left - board.opponent_worker.turns_left
 
-        score = (diff + potential * 0.4 + turn_diff * 0.3) / 80.0
+        # ── Combine ───────────────────────────────────────────────────────────
+        # Weights tuned so that a ~5 point carpet advantage ≈ 0.25 on the scale,
+        # keeping the output well within [-1, 1] for typical game states.
+        score = (
+            diff              * 1.0   # actual points are the ground truth
+          + carpet_advantage  * 0.8   # unrealised carpet potential
+          + prime_advantage   * 0.3   # positioning for future primes
+          + rat_bonus         * 0.3   # rat proximity
+          + turn_diff         * 0.2   # tempo
+        ) / 40.0
+
         return max(-1.0, min(1.0, score))
+
+
+# ── module-level helpers ──────────────────────────────────────────────────────
+
+def _table_lookup(n: int) -> float:
+    """Safe carpet points lookup, capped at length 7."""
+    return float(CARPET_POINTS_TABLE.get(min(n, 7), 21))
+
+
+def _count_primed_in_direction(pos, direction, primed_mask: int) -> int:
+    """
+    Count how many consecutive primed cells are in `direction` from `pos`.
+    Used by the rollout policy to prefer priming toward existing runs.
+    """
+    from game.enums import loc_after_direction
+    count = 0
+    cur = pos
+    for _ in range(BOARD_SIZE):
+        cur = loc_after_direction(cur, direction)
+        x, y = cur
+        if x < 0 or x >= BOARD_SIZE or y < 0 or y >= BOARD_SIZE:
+            break
+        bit = 1 << (y * BOARD_SIZE + x)
+        if primed_mask & bit:
+            count += 1
+        else:
+            break
+    return count
+
+
+def _find_primed_runs(primed_mask: int, obstacle_mask: int):
+    """
+    Yield lists of (x, y) tuples for each maximal horizontal or vertical
+    run of primed cells unbroken by blocked/carpet cells.
+    Only yields runs of length >= 1.
+    """
+    visited_h = set()
+    visited_v = set()
+
+    mask = primed_mask
+    while mask:
+        bit  = mask & (-mask)
+        mask ^= bit
+        idx  = bit.bit_length() - 1
+        x, y = idx % BOARD_SIZE, idx // BOARD_SIZE
+
+        # Horizontal run
+        if idx not in visited_h:
+            run = []
+            # walk left to find start
+            sx = x
+            while sx > 0:
+                left_bit = 1 << (y * BOARD_SIZE + sx - 1)
+                if (primed_mask & left_bit) and not (obstacle_mask & left_bit):
+                    sx -= 1
+                else:
+                    break
+            # walk right collecting cells
+            cx = sx
+            while cx < BOARD_SIZE:
+                cell_bit = 1 << (y * BOARD_SIZE + cx)
+                if (primed_mask & cell_bit) and not (obstacle_mask & cell_bit):
+                    run.append((cx, y))
+                    visited_h.add(y * BOARD_SIZE + cx)
+                    cx += 1
+                else:
+                    break
+            if run:
+                yield run
+
+        # Vertical run
+        if idx not in visited_v:
+            run = []
+            sy = y
+            while sy > 0:
+                up_bit = 1 << ((sy - 1) * BOARD_SIZE + x)
+                if (primed_mask & up_bit) and not (obstacle_mask & up_bit):
+                    sy -= 1
+                else:
+                    break
+            cy = sy
+            while cy < BOARD_SIZE:
+                cell_bit = 1 << (cy * BOARD_SIZE + x)
+                if (primed_mask & cell_bit) and not (obstacle_mask & cell_bit):
+                    run.append((x, cy))
+                    visited_v.add(cy * BOARD_SIZE + x)
+                    cy += 1
+                else:
+                    break
+            if run:
+                yield run
+
+
+def _count_open_axes(pos, primed_mask: int, blocked_mask: int, carpet_mask: int) -> int:
+    """
+    Count how many of the 4 cardinal directions from pos are 'open' —
+    meaning the adjacent cell is SPACE (not primed, blocked, or carpet)
+    so we could start or extend a prime run there.
+    """
+    from game.enums import loc_after_direction, Direction
+    obstacle = primed_mask | blocked_mask | carpet_mask
+    count = 0
+    for d in Direction:
+        nx, ny = loc_after_direction(pos, d)
+        if 0 <= nx < BOARD_SIZE and 0 <= ny < BOARD_SIZE:
+            bit = 1 << (ny * BOARD_SIZE + nx)
+            if not (obstacle & bit):
+                count += 1
+    return count

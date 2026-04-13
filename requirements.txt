@@ -1,4 +1,4 @@
-jax
+jax[cuda]
 scikit-learn
 flax
 optax

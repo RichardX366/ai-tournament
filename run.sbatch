@@ -3,7 +3,7 @@
 #SBATCH -N 1 --ntasks-per-node=1
 #SBATCH --gres=gpu:H100:1
 #SBATCH --mem-per-gpu=80G
-#SBATCH -t 1:00:00
+#SBATCH -t 0:05:00
 #SBATCH -o Output-%j.out
 
 cd $SLURM_SUBMIT_DIR/ai-tournament

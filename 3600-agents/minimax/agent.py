@@ -28,7 +28,7 @@ class PlayerAgent:
 
         # Depth 5 is a good starting point — iterative deepening means we
         # always finish depth 1-4 and only reach 5 if time allows.
-        self.searcher = Expectiminimax(max_depth=5)
+        self.searcher = Expectiminimax(max_depth=6)
         self.turn_number = 0
 
     def play(
@@ -44,27 +44,11 @@ class PlayerAgent:
         if self.rat_belief is not None:
             self.rat_belief.update(board, int(noise), int(est_distance))
 
-        # ── Time management ───────────────────────────────────────────────────
-        remaining  = time_left()
-        turns_left = board.player_worker.turns_left
-        if turns_left <= 0:
-            turns_left = 1
-
-        # Spread time evenly, but bias toward early turns where deeper search
-        # has more impact. Hard cap at 60% of remaining to avoid timeouts.
-        base_budget = remaining / turns_left
-
-        if turns_left > 20:
-            # Early game: spend up to 1.5x share, deeper search matters most
-            time_budget = min(base_budget * 1.5, remaining * 0.6)
-        elif turns_left > 10:
-            # Mid game: spend ~1x share
-            time_budget = min(base_budget * 1.0, remaining * 0.6)
-        else:
-            # Late game: tree is shallow anyway, don't waste time
-            time_budget = min(base_budget * 0.8, remaining * 0.5)
-
-        time_budget = max(time_budget, 0.05)  # at least 50ms
+        # ── Time management (adaptive) ────────────────
+        remaining = max(0.0, float(time_left()))
+        turns_left = max(1, board.player_worker.turns_left)
+        usable = max(0.15, remaining - 5.0)
+        time_budget = min(5.5, max(0.15, 1.5 * usable / turns_left))
 
         # ── Search ───────────────────────────────────────────────────────────
         best_move, value = self.searcher.search(
@@ -78,10 +62,10 @@ class PlayerAgent:
 
     def commentate(self):
         if self.rat_belief is not None:
-            best_pos  = self.rat_belief.best_guess()
+            best_pos = self.rat_belief.best_guess()
             best_prob = float(self.rat_belief.belief.max())
-            best_ev   = self.rat_belief.ev_search(best_pos)
-            nodes     = self.searcher._nodes
+            best_ev = self.rat_belief.ev_search(best_pos)
+            nodes = self.searcher._nodes
             return (
                 f"Expectiminimax agent | "
                 f"Rat: {best_pos} ({best_prob:.1%}, EV={best_ev:.2f}) | "

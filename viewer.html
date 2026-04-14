@@ -402,6 +402,19 @@
           <input type="file" id="fileInput" accept=".json" />
         </div>
       </aside>
+
+      <aside class="card">
+        <div class="side">
+          <h3>Rat Guesses</h3>
+          <table>
+            <tr>
+              <th>Turn</th>
+              <th>Player</th>
+              <th>Points</th>
+            </tr>
+          </table>
+        </div>
+      </aside>
     </div>
 
     <script>
@@ -623,6 +636,73 @@
             setTurn(next);
           }, 200);
         });
+
+        for (let i = 1; i < data.a_points.length; i++) {
+          if (
+            JSON.stringify(data.a_pos[i]) === JSON.stringify(data.a_pos[i - 1])
+          ) {
+            if (
+              data.a_points[i] == data.a_points[i - 1] - 2 ||
+              data.a_points[i] == data.a_points[i - 1] + 4
+            ) {
+              const row = document.createElement('tr');
+              const turnCell = document.createElement('td');
+              turnCell.textContent = String(i);
+              const playerCell = document.createElement('td');
+              playerCell.textContent = 'A';
+              const pointsCell = document.createElement('td');
+              pointsCell.textContent = String(
+                data.a_points[i] - data.a_points[i - 1],
+              );
+              pointsCell.style.color =
+                data.a_points[i] - data.a_points[i - 1] > 0
+                  ? 'var(--carpet)'
+                  : 'var(--b)';
+              row.appendChild(turnCell);
+              row.appendChild(playerCell);
+              row.appendChild(pointsCell);
+              document.querySelector('table').appendChild(row);
+            }
+          }
+        }
+
+        const separator = document.createElement('tr');
+        const sepCell = document.createElement('td');
+        sepCell.colSpan = 3;
+        sepCell.style.borderTop = '1px solid rgba(255, 255, 255, 0.4)';
+        sepCell.style.padding = '4px 0';
+        sepCell.style.background = 'transparent';
+        separator.appendChild(sepCell);
+        document.querySelector('table').appendChild(separator);
+
+        for (let i = 1; i < data.b_points.length; i++) {
+          if (
+            JSON.stringify(data.b_pos[i]) === JSON.stringify(data.b_pos[i - 1])
+          ) {
+            if (
+              data.b_points[i] == data.b_points[i - 1] - 2 ||
+              data.b_points[i] == data.b_points[i - 1] + 4
+            ) {
+              const row = document.createElement('tr');
+              const turnCell = document.createElement('td');
+              turnCell.textContent = String(i);
+              const playerCell = document.createElement('td');
+              playerCell.textContent = 'B';
+              const pointsCell = document.createElement('td');
+              pointsCell.textContent = String(
+                data.b_points[i] - data.b_points[i - 1],
+              );
+              pointsCell.style.color =
+                data.b_points[i] - data.b_points[i - 1] > 0
+                  ? 'var(--carpet)'
+                  : 'var(--b)';
+              row.appendChild(turnCell);
+              row.appendChild(playerCell);
+              row.appendChild(pointsCell);
+              document.querySelector('table').appendChild(row);
+            }
+          }
+        }
 
         setTurn(0);
       }

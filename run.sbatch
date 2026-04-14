@@ -37,4 +37,4 @@ echo "Running Game..."
 PLAYER_A=${1:?"Missing player A name"}
 PLAYER_B=${2:?"Missing player B name"}
 
-python3 -u engine/run_many_agents.py "$PLAYER_A" "$PLAYER_B"
+python3 -u engine/run_multiple_agents.py "$PLAYER_A" "$PLAYER_B"

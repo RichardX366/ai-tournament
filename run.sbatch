@@ -1,8 +1,6 @@
 #!/bin/bash
 #SBATCH -J Tournament
 #SBATCH -N 1 --ntasks-per-node=1
-#SBATCH --gres=gpu:H100:1
-#SBATCH --mem-per-gpu=80G
 #SBATCH -t 0:05:00
 #SBATCH -o Output-%j.out
 
@@ -39,4 +37,4 @@ echo "Running Game..."
 PLAYER_A=${1:?"Missing player A name"}
 PLAYER_B=${2:?"Missing player B name"}
 
-python3 -u engine/run_local_agents.py "$PLAYER_A" "$PLAYER_B"
+python3 -u engine/run_many_agents.py "$PLAYER_A" "$PLAYER_B"

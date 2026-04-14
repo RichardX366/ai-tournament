@@ -10,7 +10,7 @@ from game.enums import ResultArbiter
 from gameplay import play_game
 
 
-SIMULATIONS = 24
+SIMULATIONS = 16
 
 
 def _extract_a_b_workers(board: Board):

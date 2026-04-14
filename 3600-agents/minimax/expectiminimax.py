@@ -1,8 +1,3 @@
-"""
-expectiminimax.py — Negamax with PVS, width-limited alpha-beta, and
-iterative deepening.
-"""
-
 import time
 from typing import Optional, Tuple, List
 
@@ -22,16 +17,18 @@ from game.enums import (
 # ── constants ─────────────────────────────────────────────────────────────────
 _INF = float("inf")
 _CARPET_PTS = [0, -1, 2, 4, 6, 10, 15, 21]
-_CPT_EV = [0.0, -1.0] + [(5 * _CARPET_PTS[L] - 1) / 6.0 for L in range(2, 8)]
+_CARPET_EVALUATIONS = [0.0, -1.0] + [
+    (5 * _CARPET_PTS[L] - 1) / 6.0 for L in range(2, 8)
+]
 
-_DIRS = [Direction.UP, Direction.RIGHT, Direction.DOWN, Direction.LEFT]
-_DD = {
+_DIRECTIONS = [Direction.UP, Direction.RIGHT, Direction.DOWN, Direction.LEFT]
+_DIRECTION_MOVEMENTS = {
     Direction.UP: (0, -1),
     Direction.DOWN: (0, 1),
     Direction.LEFT: (-1, 0),
     Direction.RIGHT: (1, 0),
 }
-_OPP_D = {
+_OPPOSITE_DIRECTIONS = {
     Direction.UP: Direction.DOWN,
     Direction.DOWN: Direction.UP,
     Direction.LEFT: Direction.RIGHT,
@@ -39,13 +36,13 @@ _OPP_D = {
 }
 
 # Pre-computed 64x64 Manhattan distance table
-_IDX_TO_LOC = [(i % BOARD_SIZE, i // BOARD_SIZE) for i in range(64)]
-_DIST = np.zeros((64, 64), dtype=np.float64)
+_INDEX_TO_LOCATION = [(i % BOARD_SIZE, i // BOARD_SIZE) for i in range(64)]
+_DISTANCES = np.zeros((64, 64), dtype=np.float64)
 for _wi in range(64):
-    _wx, _wy = _IDX_TO_LOC[_wi]
+    _wx, _wy = _INDEX_TO_LOCATION[_wi]
     for _ri in range(64):
-        _rx, _ry = _IDX_TO_LOC[_ri]
-        _DIST[_wi, _ri] = abs(_wx - _rx) + abs(_wy - _ry)
+        _rx, _ry = _INDEX_TO_LOCATION[_ri]
+        _DISTANCES[_wi, _ri] = abs(_wx - _rx) + abs(_wy - _ry)
 
 # Neighbor offsets for local openness (pre-computed)
 _NEIGHBOR_OFFSETS = [(0, -1), (1, 0), (0, 1), (-1, 0)]
@@ -55,10 +52,6 @@ for _dx, _dy in _NEIGHBOR_OFFSETS:
     for _dx2, _dy2 in _NEIGHBOR_OFFSETS:
         nbr2.append((_dx + _dx2, _dy + _dy2))
     _NEIGHBOR2.append((_dx, _dy, nbr2))
-
-
-def _cev(L):
-    return _CPT_EV[L] if 0 <= L < len(_CPT_EV) else 0.0
 
 
 # ── move ordering ─────────────────────────────────────────────────────────────
@@ -78,8 +71,8 @@ def _order_moves_full(board, moves, evaluate_fn):
             points = 1.0
         elif move_type == MoveType.CARPET:
             points = (
-                _CPT_EV[move.roll_length]
-                if 0 <= move.roll_length < len(_CPT_EV)
+                _CARPET_EVALUATIONS[move.roll_length]
+                if 0 <= move.roll_length < len(_CARPET_EVALUATIONS)
                 else 0.0
             )
         score = -evaluate_fn(child) + 0.55 * points
@@ -115,12 +108,14 @@ def _order_moves_fast(board, moves):
         if move_type == MoveType.CARPET:
             roll_length = move.roll_length
             score = (
-                _CPT_EV[roll_length] if 0 <= roll_length < len(_CPT_EV) else 0.0
+                _CARPET_EVALUATIONS[roll_length]
+                if 0 <= roll_length < len(_CARPET_EVALUATIONS)
+                else 0.0
             ) * 3
         elif move_type == MoveType.PRIME:
             score = 2.0
-            opposite_direction = _OPP_D[move.direction]
-            opposite_dx, opposite_dy = _DD[opposite_direction]
+            opposite_direction = _OPPOSITE_DIRECTIONS[move.direction]
+            opposite_dx, opposite_dy = _DIRECTION_MOVEMENTS[opposite_direction]
             behind_x, behind_y = pos_x + opposite_dx, pos_y + opposite_dy
             if (
                 0 <= behind_x < 8
@@ -148,103 +143,107 @@ def _evaluate(board, rat_belief):
             return -999.0
         return 0.0
 
-    me = board.player_worker
-    opp = board.opponent_worker
-    my_loc = me.get_location()
-    opp_loc = opp.get_location()
+    player = board.player_worker
+    opponent = board.opponent_worker
+    player_loc = player.get_location()
+    opponent_loc = opponent.get_location()
 
-    score_diff = float(me.get_points() - opp.get_points())
-    turn_diff = float(me.turns_left - opp.turns_left)
+    score_diff = float(player.get_points() - opponent.get_points())
+    turn_diff = float(player.turns_left - opponent.turns_left)
 
-    my_moves = board.get_valid_moves(enemy=False, exclude_search=True)
-    opp_moves = board.get_valid_moves(enemy=True, exclude_search=True)
+    player_moves = board.get_valid_moves(enemy=False, exclude_search=True)
+    opponent_moves = board.get_valid_moves(enemy=True, exclude_search=True)
 
     # Inline _tact for both sides to avoid function call overhead
-    my_cb = 0
-    my_cs = 0
-    my_pc = 0
-    for mv in my_moves:
+    player_best_carpet = 0
+    player_carpet_sum = 0
+    player_prime_count = 0
+    for mv in player_moves:
         mt = mv.move_type
         if mt == MoveType.CARPET:
             rl = mv.roll_length
-            pts = _CPT_EV[rl] if 0 <= rl < len(_CPT_EV) else 0.0
-            if pts > my_cb:
-                my_cb = pts
+            pts = _CARPET_EVALUATIONS[rl] if 0 <= rl < len(_CARPET_EVALUATIONS) else 0.0
+            if pts > player_best_carpet:
+                player_best_carpet = pts
             if pts > 0:
-                my_cs += pts
+                player_carpet_sum += pts
         elif mt == MoveType.PRIME:
-            my_pc += 1
+            player_prime_count += 1
 
-    opp_cb = 0
-    opp_cs = 0
-    opp_pc = 0
-    for mv in opp_moves:
+    opponent_best_carpet = 0
+    opponent_carpet_sum = 0
+    opponent_prime_count = 0
+    for mv in opponent_moves:
         mt = mv.move_type
         if mt == MoveType.CARPET:
             rl = mv.roll_length
-            pts = _CPT_EV[rl] if 0 <= rl < len(_CPT_EV) else 0.0
-            if pts > opp_cb:
-                opp_cb = pts
+            pts = _CARPET_EVALUATIONS[rl] if 0 <= rl < len(_CARPET_EVALUATIONS) else 0.0
+            if pts > opponent_best_carpet:
+                opponent_best_carpet = pts
             if pts > 0:
-                opp_cs += pts
+                opponent_carpet_sum += pts
         elif mt == MoveType.PRIME:
-            opp_pc += 1
+            opponent_prime_count += 1
 
     # Local openness — bitmask-based for speed
     blocked = board._blocked_mask
-    mx, myy = my_loc
-    ox, oy = opp_loc
-    my_open = 0
-    opp_open = 0
+    player_x, player_y = player_loc
+    opponent_x, opponent_y = opponent_loc
+    player_openness = 0
+    opponent_openness = 0
     for dx, dy, nbr2 in _NEIGHBOR2:
-        nx, ny = mx + dx, myy + dy
+        nx, ny = player_x + dx, player_y + dy
         if 0 <= nx < 8 and 0 <= ny < 8 and not (blocked & (1 << (ny * 8 + nx))):
-            my_open += 2
+            player_openness += 2
             for dx2, dy2 in nbr2:
-                nx2, ny2 = mx + dx2, myy + dy2
+                nx2, ny2 = player_x + dx2, player_y + dy2
                 if (
                     0 <= nx2 < 8
                     and 0 <= ny2 < 8
                     and not (blocked & (1 << (ny2 * 8 + nx2)))
                 ):
-                    my_open += 1
-        nx, ny = ox + dx, oy + dy
+                    player_openness += 1
+        nx, ny = opponent_x + dx, opponent_y + dy
         if 0 <= nx < 8 and 0 <= ny < 8 and not (blocked & (1 << (ny * 8 + nx))):
-            opp_open += 2
+            opponent_openness += 2
             for dx2, dy2 in nbr2:
-                nx2, ny2 = ox + dx2, oy + dy2
+                nx2, ny2 = opponent_x + dx2, opponent_y + dy2
                 if (
                     0 <= nx2 < 8
                     and 0 <= ny2 < 8
                     and not (blocked & (1 << (ny2 * 8 + nx2)))
                 ):
-                    opp_open += 1
+                    opponent_openness += 1
 
-    my_center = 7.0 - (abs(mx - 3.5) + abs(myy - 3.5))
-    opp_center = 7.0 - (abs(ox - 3.5) + abs(oy - 3.5))
+    player_center = 7.0 - (abs(player_x - 3.5) + abs(player_y - 3.5))
+    opponent_center = 7.0 - (abs(opponent_x - 3.5) + abs(opponent_y - 3.5))
 
-    my_ext = _ext(board, my_loc, my_loc, opp_loc)
-    opp_ext = _ext(board, opp_loc, my_loc, opp_loc)
+    player_extension = _ext(board, player_loc, player_loc, opponent_loc)
+    opponent_extension = _ext(board, opponent_loc, player_loc, opponent_loc)
 
     v = (
         3.0 * score_diff
         + 0.12 * turn_diff
-        + 0.28 * (len(my_moves) - len(opp_moves))
-        + 0.95 * (my_cb - opp_cb)
-        + 0.18 * (my_cs - opp_cs)
-        + 0.35 * (my_pc - opp_pc)
-        + 0.22 * (my_open - opp_open)
-        + 0.14 * (my_center - opp_center)
-        + 0.45 * (my_ext - opp_ext)
+        + 0.28 * (len(player_moves) - len(opponent_moves))
+        + 0.95 * (player_best_carpet - opponent_best_carpet)
+        + 0.18 * (player_carpet_sum - opponent_carpet_sum)
+        + 0.35 * (player_prime_count - opponent_prime_count)
+        + 0.22 * (player_openness - opponent_openness)
+        + 0.14 * (player_center - opponent_center)
+        + 0.45 * (player_extension - opponent_extension)
     )
 
     # Rat proximity — numpy vectorized
     if rat_belief is not None:
         belief = rat_belief.belief
-        wi = myy * 8 + mx
-        oi = oy * 8 + ox
+        player_idx = player_y * 8 + player_x
+        opponent_idx = opponent_y * 8 + opponent_x
         v += 0.10 * float(
-            np.dot(belief, _DIST[oi].astype(np.float64) - _DIST[wi].astype(np.float64))
+            np.dot(
+                belief,
+                _DISTANCES[opponent_idx].astype(np.float64)
+                - _DISTANCES[player_idx].astype(np.float64),
+            )
         )
 
     return v
@@ -256,43 +255,50 @@ def _ext(board, loc, player_loc, opp_loc):
     bit = 1 << (y * 8 + x)
     primed = board._primed_mask
     carpet = board._carpet_mask
-    block = board._blocked_mask
-    if (primed | carpet | block) & bit:
+    blocked = board._blocked_mask
+    if (primed | carpet | blocked) & bit:
         return 0.0
     best = 0.0
-    for d in _DIRS:
-        dx, dy = _DD[d]
-        nx, ny = x + dx, y + dy
-        if not (0 <= nx < 8 and 0 <= ny < 8):
+    for direction in _DIRECTIONS:
+        dx, dy = _DIRECTION_MOVEMENTS[direction]
+        next_x, next_y = x + dx, y + dy
+        if not (0 <= next_x < 8 and 0 <= next_y < 8):
             continue
-        nb = 1 << (ny * 8 + nx)
-        if (block | primed) & nb:
+        next_bit = 1 << (next_y * 8 + next_x)
+        if (blocked | primed) & next_bit:
             continue
-        if (nx, ny) == player_loc or (nx, ny) == opp_loc:
+        if (next_x, next_y) == player_loc or (next_x, next_y) == opp_loc:
             continue
-        od = _OPP_D[d]
-        odx, ody = _DD[od]
-        behind = 0
-        bx, by = x + odx, y + ody
-        while 0 <= bx < 8 and 0 <= by < 8 and (primed & (1 << (by * 8 + bx))):
-            behind += 1
-            bx += odx
-            by += ody
-        ahead = 0
-        cx, cy = nx + dx, ny + dy
+        opposite_dir = _OPPOSITE_DIRECTIONS[direction]
+        opp_dx, opp_dy = _DIRECTION_MOVEMENTS[opposite_dir]
+        primed_behind = 0
+        behind_x, behind_y = x + opp_dx, y + opp_dy
+        while (
+            0 <= behind_x < 8
+            and 0 <= behind_y < 8
+            and (primed & (1 << (behind_y * 8 + behind_x)))
+        ):
+            primed_behind += 1
+            behind_x += opp_dx
+            behind_y += opp_dy
+        available_ahead = 0
+        ahead_x, ahead_y = next_x + dx, next_y + dy
         space = board._space_mask
-        while 0 <= cx < 8 and 0 <= cy < 8:
-            cb = 1 << (cy * 8 + cx)
-            if (space & cb) and not ((primed | carpet | block) & cb):
-                ahead += 1
-                cx += dx
-                cy += dy
+        while 0 <= ahead_x < 8 and 0 <= ahead_y < 8:
+            ahead_bit = 1 << (ahead_y * 8 + ahead_x)
+            if (space & ahead_bit) and not ((primed | carpet | blocked) & ahead_bit):
+                available_ahead += 1
+                ahead_x += dx
+                ahead_y += dy
             else:
                 break
-        if behind > 0:
-            val = _CPT_EV[min(behind + 1, 7)] * 0.5 + ahead * 0.15
+        if primed_behind > 0:
+            val = (
+                _CARPET_EVALUATIONS[min(primed_behind + 1, 7)] * 0.5
+                + available_ahead * 0.15
+            )
         else:
-            val = ahead * 0.2
+            val = available_ahead * 0.2
         if val > best:
             best = val
     return best

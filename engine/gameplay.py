@@ -7,6 +7,7 @@ from collections.abc import Iterable
 import jax
 import jax.numpy as jnp
 
+
 def _load_transition_matrix():
     base_dir = os.path.join(os.path.dirname(__file__), "transition_matrices")
     pkl_files = [f for f in os.listdir(base_dir) if f.endswith(".pkl")]
@@ -28,6 +29,7 @@ def _load_transition_matrix():
     T = T / row_sum
 
     return T
+
 
 from board_utils import get_board_string, generate_spawns
 from game.board import Board
@@ -59,9 +61,13 @@ def print_board(board: Board, rat: Rat, clear_screen, board_only=False):
     if not board_only:
         board_list.append("\n--- TURN " + str(board.turn_count) + ": ")
         if board.is_player_a_turn:
-            board_list.append(f"A to play, Time left:{board.player_worker.time_left:.2f}\n")
+            board_list.append(
+                f"A to play, Time left:{board.player_worker.time_left:.2f}\n"
+            )
         else:
-            board_list.append(f"B to play, Time left:{board.player_worker.time_left:.2f}\n")
+            board_list.append(
+                f"B to play, Time left:{board.player_worker.time_left:.2f}\n"
+            )
 
     board_list.append(player_map)
     board_list.append(f" POINTS A:{a_points: <2d} B:{b_points: <2d}\n")
@@ -81,7 +87,10 @@ def print_moves(player_as_turn, move, timer):
             print("None", end="")
         else:
             if move.move_type == MoveType.CARPET:
-                print(f"({move.direction.name}, {move.move_type.name}, roll={move.roll_length})", end="")
+                print(
+                    f"({move.direction.name}, {move.move_type.name}, roll={move.roll_length})",
+                    end="",
+                )
             elif move.move_type == MoveType.SEARCH:
                 print(f"(SEARCH, loc={move.search_loc})", end="")
             else:
@@ -105,7 +114,7 @@ def validate_submission(
     try:
         play_time = 240
         extra_ret_time = 5
-        init_timeout = 30 
+        init_timeout = 30
 
         main_q = Queue()
         player_a_q = Queue()
@@ -314,8 +323,6 @@ def play_game(
     message_a = ""
     message_b = ""
 
-    
-
     try:
         player_a_process.start()
         success_a = main_q_a.get(block=True, timeout=init_timeout)
@@ -368,8 +375,10 @@ def play_game(
     #
     timer = 0
     winner = ResultArbiter.TIE
-    searches = deque([(None, False), (None, False)], maxlen=2) #(Search Loc, Search Result)
-    while (not board.is_game_over()):
+    searches = deque(
+        [(None, False), (None, False)], maxlen=2
+    )  # (Search Loc, Search Result)
+    while not board.is_game_over():
         if display_game:
             init_display(board, "PLAYER A", "PLAYER B")
 
@@ -379,7 +388,6 @@ def play_game(
                 rat,
                 clear_screen,
             )
-
 
         # Rat moves every turn before sampling so the sensor always reflects
         # the rat's current position.
@@ -425,7 +433,6 @@ def play_game(
                     board.is_player_a_turn = not board.is_player_a_turn
                 elif board.player_worker.time_left <= 0:
                     board.set_winner(Result.ENEMY, WinReason.TIMEOUT)
-
 
         # Check if rat was caught and track search info
         rat_was_caught = False
@@ -477,22 +484,16 @@ def play_game(
 
     if board.is_game_over():
         if display_game:
-            print_board(
-                board,
-                rat,
-                clear_screen,
-                board_only=True
-            )
+            print_board(board, rat, clear_screen, board_only=True)
             print(f"{winner.name} wins by {board.get_win_reason().name}")
-    
-    if(message_a==""):
+
+    if message_a == "":
         message_a = player_a_process.run_timed_commentary(3)
 
-
-    if(message_b==""):
+    if message_b == "":
         message_b = player_b_process.run_timed_commentary(3)
-    print(f"Player A message: {message_a}")
-    print(f"Player B message: {message_b}")
+    # print(f"Player A message: {message_a}")
+    # print(f"Player B message: {message_b}")
     terminate_game(player_a_process, player_b_process, queues, out_queue, stop_event)
 
     # Return board, spawns, and error messages

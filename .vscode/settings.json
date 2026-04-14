@@ -1,6 +1,4 @@
 {
-  "python.analysis.extraPaths": [
-    "./engine"
-  ],
-  "python-envs.defaultEnvManager": "ms-python.python:system"
+  "python.analysis.extraPaths": ["./engine"],
+  "python-envs.defaultEnvManager": "ms-python.python:venv"
 }

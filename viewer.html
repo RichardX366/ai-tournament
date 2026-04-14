@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Match Viewer</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --panel: #151b2f;
+        --panel-2: #1d2540;
+        --text: #e8edf8;
+        --muted: #a9b4d0;
+        --grid: #5e6a8a;
+        --blocked: #6b7280;
+        --plain: #f8fafc;
+        --prime: #fde68a;
+        --carpet: #86efac;
+        --a: #60a5fa;
+        --b: #f87171;
+        --rat: #facc15;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family:
+          Inter,
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+        background: linear-gradient(180deg, var(--bg), #0f172a);
+        color: var(--text);
+      }
+
+      .wrap {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 24px;
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 20px;
+      }
+
+      .card {
+        background: rgba(21, 27, 47, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 20px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+        overflow: hidden;
+      }
+
+      .card h2,
+      .card h3 {
+        margin: 0;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+      }
+
+      .header {
+        padding: 18px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .sub {
+        color: var(--muted);
+        font-size: 14px;
+        margin-top: 6px;
+      }
+
+      .board-shell {
+        padding: 20px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .board {
+        display: grid;
+        grid-template-columns: repeat(8, 60px);
+        grid-template-rows: repeat(8, 60px);
+        gap: 6px;
+        background: rgba(255, 255, 255, 0.04);
+        padding: 8px;
+        border-radius: 18px;
+        position: relative;
+      }
+
+      .cell {
+        width: 60px;
+        height: 60px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 20px;
+        position: relative;
+        color: #111827;
+      }
+
+      .plain {
+        background: var(--plain);
+      }
+      .prime {
+        background: var(--prime);
+      }
+      .carpet {
+        background: var(--carpet);
+      }
+      .blocked {
+        background: var(--blocked);
+        color: white;
+      }
+
+      .coord {
+        position: absolute;
+        top: 4px;
+        left: 6px;
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(17, 24, 39, 0.55);
+        pointer-events: none;
+      }
+
+      .token {
+        width: 38px;
+        height: 38px;
+        border-radius: 999px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 18px;
+        border: 2px solid rgba(255, 255, 255, 0.75);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+        position: absolute;
+      }
+
+      .token.a {
+        background: var(--a);
+        transform: translate(-8px, 0);
+      }
+      .token.b {
+        background: var(--b);
+        transform: translate(8px, 0);
+      }
+      .token.rat {
+        width: 28px;
+        height: 28px;
+        font-size: 14px;
+        background: var(--rat);
+        color: #111827;
+        border-color: rgba(17, 24, 39, 0.25);
+        transform: translateY(14px);
+      }
+
+      .side {
+        padding: 20px;
+        display: grid;
+        gap: 16px;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+      }
+
+      .stat {
+        background: var(--panel-2);
+        border-radius: 16px;
+        padding: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      .label {
+        font-size: 12px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 8px;
+      }
+
+      .value {
+        font-size: 22px;
+        font-weight: 800;
+      }
+
+      .controls {
+        display: grid;
+        gap: 12px;
+      }
+
+      .btns {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        background: #2a355b;
+        color: var(--text);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        padding: 10px 14px;
+        cursor: pointer;
+        font-weight: 700;
+      }
+
+      button:hover {
+        filter: brightness(1.08);
+      }
+
+      input[type='range'] {
+        width: 100%;
+      }
+
+      .log {
+        background: #0f1529;
+        border-radius: 16px;
+        padding: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: #dbe5ff;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 999px;
+        padding: 8px 12px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        display: inline-block;
+      }
+
+      .wide {
+        grid-column: 1 / -1;
+      }
+
+      @media (max-width: 980px) {
+        .wrap {
+          grid-template-columns: 1fr;
+        }
+        .board {
+          grid-template-columns: repeat(8, 42px);
+          grid-template-rows: repeat(8, 42px);
+        }
+        .cell {
+          width: 42px;
+          height: 42px;
+          font-size: 16px;
+        }
+        .token {
+          width: 28px;
+          height: 28px;
+          font-size: 14px;
+        }
+        .token.rat {
+          width: 22px;
+          height: 22px;
+          font-size: 11px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <section class="card">
+        <div class="header">
+          <div>
+            <h2>Match Viewer</h2>
+            <div class="sub" id="summary"></div>
+          </div>
+          <div class="pill" id="turnBadge">Turn 0</div>
+        </div>
+        <div class="board-shell">
+          <div id="board" class="board"></div>
+        </div>
+      </section>
+
+      <aside class="card">
+        <div class="side">
+          <div class="controls">
+            <h3>Timeline</h3>
+            <input
+              id="slider"
+              type="range"
+              min="0"
+              max="0"
+              step="1"
+              value="0"
+            />
+            <div class="btns">
+              <button id="prevBtn">◀ Prev</button>
+              <button id="playBtn">▶ Play</button>
+              <button id="nextBtn">Next ▶</button>
+            </div>
+          </div>
+
+          <div class="stats">
+            <div class="stat">
+              <div class="label">A position</div>
+              <div class="value" id="aPos"></div>
+            </div>
+            <div class="stat">
+              <div class="label">B position</div>
+              <div class="value" id="bPos"></div>
+            </div>
+            <div class="stat">
+              <div class="label">A score / turns / time</div>
+              <div class="value" id="aStats"></div>
+            </div>
+            <div class="stat">
+              <div class="label">B score / turns / time</div>
+              <div class="value" id="bStats"></div>
+            </div>
+            <div class="stat">
+              <div class="label">Rat caught</div>
+              <div class="value" id="ratCaught"></div>
+            </div>
+            <div class="stat">
+              <div class="label">Left behind</div>
+              <div class="value" id="leftBehind"></div>
+            </div>
+          </div>
+
+          <div>
+            <h3 style="margin-bottom: 10px">Legend</h3>
+            <div class="legend">
+              <span class="pill"
+                ><span class="dot" style="background: var(--plain)"></span>
+                Plain</span
+              >
+              <span class="pill"
+                ><span class="dot" style="background: var(--prime)"></span>
+                Prime</span
+              >
+              <span class="pill"
+                ><span class="dot" style="background: var(--carpet)"></span>
+                Carpet</span
+              >
+              <span class="pill"
+                ><span class="dot" style="background: var(--blocked)"></span>
+                Blocked</span
+              >
+              <span class="pill"
+                ><span class="dot" style="background: var(--a)"></span> A</span
+              >
+              <span class="pill"
+                ><span class="dot" style="background: var(--b)"></span> B</span
+              >
+              <span class="pill"
+                ><span class="dot" style="background: var(--rat)"></span>
+                Rat</span
+              >
+            </div>
+          </div>
+
+          <div>
+            <h3 style="margin-bottom: 10px">Outcome</h3>
+            <div class="log" id="outcome"></div>
+          </div>
+
+          <div>
+            <h3 style="margin-bottom: 10px">Errors</h3>
+            <div class="log" id="errors"></div>
+          </div>
+        </div>
+      </aside>
+
+      <aside class="card">
+        <div class="side">
+          <input type="file" id="fileInput" accept=".json" />
+        </div>
+      </aside>
+    </div>
+
+    <script>
+      document.querySelector('#fileInput').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const data = JSON.parse(event.target.result);
+            load(data);
+          } catch (error) {
+            console.error('Error parsing JSON:', error);
+          }
+        };
+        reader.readAsText(file);
+      });
+
+      function load(data) {
+        const size = 8;
+        const boardEl = document.getElementById('board');
+        const slider = document.getElementById('slider');
+        const playBtn = document.getElementById('playBtn');
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const turnBadge = document.getElementById('turnBadge');
+
+        const totalFrames = Math.max(
+          data.a_pos.length,
+          data.b_pos.length,
+          data.a_points.length,
+          data.b_points.length,
+          data.a_turns_left.length,
+          data.b_turns_left.length,
+          data.a_time_left.length,
+          data.b_time_left.length,
+          data.rat_caught.length,
+          data.left_behind.length,
+        );
+
+        slider.max = String(totalFrames - 1);
+
+        const blocked = new Set(
+          data.blocked_positions.map(([x, y]) => `${x},${y}`),
+        );
+
+        const tileCount = size * size;
+
+        function toIdx(x, y) {
+          return y * size + x;
+        }
+
+        function inBounds(x, y) {
+          return x >= 0 && x < size && y >= 0 && y < size;
+        }
+
+        // 0=plain, 1=prime, 2=carpet
+        const tileStatusByTurn = new Array(totalFrames);
+        tileStatusByTurn[0] = new Uint8Array(tileCount);
+
+        for (let turn = 1; turn < totalFrames; turn++) {
+          const prev = tileStatusByTurn[turn - 1];
+          const cur = new Uint8Array(prev);
+
+          // Persist carpets across turns.
+          for (const [cx, cy] of data.new_carpets?.[turn] || []) {
+            if (!inBounds(cx, cy)) continue;
+            cur[toIdx(cx, cy)] = 2;
+          }
+
+          // Persist primes across turns, until overwritten by carpet.
+          if (data.left_behind?.[turn] === 'prime') {
+            // Engine history alternates moves: turn 1 is player A, turn 2 is player B, etc.
+            const isPlayerA = turn % 2 !== 0;
+            const lastPos = isPlayerA
+              ? data.a_pos?.[turn - 1]
+              : data.b_pos?.[turn - 1];
+
+            if (lastPos) {
+              const [px, py] = lastPos;
+              if (inBounds(px, py)) {
+                const idx = toIdx(px, py);
+                if (cur[idx] !== 2) cur[idx] = 1;
+              }
+            }
+          }
+
+          tileStatusByTurn[turn] = cur;
+        }
+
+        let timer = null;
+
+        function fmtPos(pos) {
+          return pos ? `(${pos[0]}, ${pos[1]})` : '—';
+        }
+
+        function fmtTime(t) {
+          return typeof t === 'number' ? t.toFixed(2) + 's' : '—';
+        }
+
+        function getTileType(x, y, turn) {
+          if (blocked.has(`${x},${y}`)) return 'blocked';
+          const status = tileStatusByTurn[turn]?.[toIdx(x, y)] || 0;
+          if (status === 2) return 'carpet';
+          if (status === 1) return 'prime';
+          return 'plain';
+        }
+
+        function render(turn) {
+          boardEl.innerHTML = '';
+          const aPos = data.a_pos[turn];
+          const bPos = data.b_pos[turn];
+          const ratPos =
+            data.rat_position_history[
+              Math.min(turn, data.rat_position_history.length - 1)
+            ];
+
+          for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+              const cell = document.createElement('div');
+              cell.className = `cell ${getTileType(x, y, turn)}`;
+
+              const coord = document.createElement('div');
+              coord.className = 'coord';
+              coord.textContent = `${x},${y}`;
+              cell.appendChild(coord);
+
+              if (aPos && aPos[0] === x && aPos[1] === y) {
+                const t = document.createElement('div');
+                t.className = 'token a';
+                t.textContent = 'A';
+                cell.appendChild(t);
+              }
+
+              if (bPos && bPos[0] === x && bPos[1] === y) {
+                const t = document.createElement('div');
+                t.className = 'token b';
+                t.textContent = 'B';
+                cell.appendChild(t);
+              }
+
+              if (ratPos && ratPos[0] === x && ratPos[1] === y) {
+                const t = document.createElement('div');
+                t.className = 'token rat';
+                t.textContent = 'r';
+                cell.appendChild(t);
+              }
+
+              boardEl.appendChild(cell);
+            }
+          }
+
+          turnBadge.textContent = `Turn ${turn}`;
+          document.getElementById('summary').textContent =
+            `Result ${data.result} • Reason: ${data.reason} • Total turns: ${data.turn_count}`;
+          document.getElementById('aPos').textContent = fmtPos(aPos);
+          document.getElementById('bPos').textContent = fmtPos(bPos);
+          document.getElementById('aStats').textContent =
+            `${data.a_points[turn]} / ${data.a_turns_left[turn]} / ${fmtTime(data.a_time_left[turn])}`;
+          document.getElementById('bStats').textContent =
+            `${data.b_points[turn]} / ${data.b_turns_left[turn]} / ${fmtTime(data.b_time_left[turn])}`;
+          document.getElementById('ratCaught').textContent = data.rat_caught[
+            turn
+          ]
+            ? 'Yes'
+            : 'No';
+          document.getElementById('leftBehind').textContent =
+            data.left_behind[turn] || '—';
+          document.getElementById('outcome').textContent = JSON.stringify(
+            {
+              result: data.result,
+              reason: data.reason,
+              turn_count: data.turn_count,
+            },
+            null,
+            2,
+          );
+          document.getElementById('errors').textContent = JSON.stringify(
+            {
+              errlog_a: data.errlog_a,
+              errlog_b: data.errlog_b,
+            },
+            null,
+            2,
+          );
+        }
+
+        function setTurn(turn) {
+          const clamped = Math.max(0, Math.min(totalFrames - 1, turn));
+          slider.value = String(clamped);
+          render(clamped);
+        }
+
+        prevBtn.addEventListener('click', () =>
+          setTurn(Number(slider.value) - 1),
+        );
+        nextBtn.addEventListener('click', () =>
+          setTurn(Number(slider.value) + 1),
+        );
+        slider.addEventListener('input', () => render(Number(slider.value)));
+
+        playBtn.addEventListener('click', () => {
+          if (timer) {
+            clearInterval(timer);
+            timer = null;
+            playBtn.textContent = '▶ Play';
+            return;
+          }
+          playBtn.textContent = '⏸ Pause';
+          timer = setInterval(() => {
+            const next = Number(slider.value) + 1;
+            if (next >= totalFrames) {
+              clearInterval(timer);
+              timer = null;
+              playBtn.textContent = '▶ Play';
+              return;
+            }
+            setTurn(next);
+          }, 200);
+        });
+
+        setTurn(0);
+      }
+    </script>
+  </body>
+</html>

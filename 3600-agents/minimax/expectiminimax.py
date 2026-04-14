@@ -67,21 +67,25 @@ def _cev(L):
 def _order_moves_full(board, moves, evaluate_fn):
     """Eval-based ordering at root for best pruning."""
     scored = []
-    for mv in moves:
-        child = board.forecast_move(mv, check_ok=True)
+    for move in moves:
+        child = board.forecast_move(move, check_ok=True)
         if child is None:
             continue
         child.reverse_perspective()
-        pts = 0.0
-        mt = mv.move_type
-        if mt == MoveType.PRIME:
-            pts = 1.0
-        elif mt == MoveType.CARPET:
-            pts = _CPT_EV[mv.roll_length] if 0 <= mv.roll_length < len(_CPT_EV) else 0.0
-        score = -evaluate_fn(child) + 0.55 * pts
-        scored.append((score, mv))
+        points = 0.0
+        move_type = move.move_type
+        if move_type == MoveType.PRIME:
+            points = 1.0
+        elif move_type == MoveType.CARPET:
+            points = (
+                _CPT_EV[move.roll_length]
+                if 0 <= move.roll_length < len(_CPT_EV)
+                else 0.0
+            )
+        score = -evaluate_fn(child) + 0.55 * points
+        scored.append((score, move))
     scored.sort(key=lambda t: t[0], reverse=True)
-    ordered = [mv for _, mv in scored]
+    ordered = [move for _, move in scored]
     if len(ordered) > 16:
         carpets = [m for m in ordered if m.move_type == MoveType.CARPET][:6]
         primes = [m for m in ordered if m.move_type == MoveType.PRIME][:6]
@@ -102,27 +106,33 @@ def _order_moves_full(board, moves, evaluate_fn):
 
 def _order_moves_fast(board, moves):
     """Cheap ordering for internal nodes."""
-    pos = board.player_worker.get_location()
-    px, py = pos
+    position = board.player_worker.get_location()
+    pos_x, pos_y = position
     primed_mask = board._primed_mask
     scored = []
-    for mv in moves:
-        mt = mv.move_type
-        if mt == MoveType.CARPET:
-            rl = mv.roll_length
-            s = (_CPT_EV[rl] if 0 <= rl < len(_CPT_EV) else 0.0) * 3
-        elif mt == MoveType.PRIME:
-            s = 2.0
-            od = _OPP_D[mv.direction]
-            odx, ody = _DD[od]
-            bx, by = px + odx, py + ody
-            if 0 <= bx < 8 and 0 <= by < 8 and (primed_mask & (1 << (by * 8 + bx))):
-                s += 4
+    for move in moves:
+        move_type = move.move_type
+        if move_type == MoveType.CARPET:
+            roll_length = move.roll_length
+            score = (
+                _CPT_EV[roll_length] if 0 <= roll_length < len(_CPT_EV) else 0.0
+            ) * 3
+        elif move_type == MoveType.PRIME:
+            score = 2.0
+            opposite_direction = _OPP_D[move.direction]
+            opposite_dx, opposite_dy = _DD[opposite_direction]
+            behind_x, behind_y = pos_x + opposite_dx, pos_y + opposite_dy
+            if (
+                0 <= behind_x < 8
+                and 0 <= behind_y < 8
+                and (primed_mask & (1 << (behind_y * 8 + behind_x)))
+            ):
+                score += 4
         else:
-            s = 0.0
-        scored.append((s, mv))
+            score = 0.0
+        scored.append((score, move))
     scored.sort(key=lambda t: t[0], reverse=True)
-    return [mv for _, mv in scored]
+    return [move for _, move in scored]
 
 
 # ── static evaluation ─────────────────────────────────────────────────────────

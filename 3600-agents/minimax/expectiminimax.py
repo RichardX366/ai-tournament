@@ -68,7 +68,7 @@ def _order_moves_full(board, moves, evaluate_fn):
         points = 0.0
         move_type = move.move_type
         if move_type == MoveType.PRIME:
-            points = 1.0
+            points = 0.5
         elif move_type == MoveType.CARPET:
             points = (
                 _CARPET_EVALUATIONS[move.roll_length]
@@ -113,7 +113,7 @@ def _order_moves_fast(board, moves):
                 else 0.0
             ) * 3
         elif move_type == MoveType.PRIME:
-            score = 2.0
+            score = 1.0
             opposite_direction = _OPPOSITE_DIRECTIONS[move.direction]
             opposite_dx, opposite_dy = _DIRECTION_MOVEMENTS[opposite_direction]
             behind_x, behind_y = pos_x + opposite_dx, pos_y + opposite_dy

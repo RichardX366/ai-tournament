@@ -397,6 +397,49 @@
         </div>
       </aside>
 
+      <aside class="card wide">
+        <div class="side">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              gap: 12px;
+              flex-wrap: wrap;
+            "
+          >
+            <h3>Minimax move scores (current player)</h3>
+            <div class="pill" id="minimaxPlayerBadge">—</div>
+          </div>
+          <div
+            class="sub"
+            id="minimaxNote"
+            style="color: var(--muted); font-size: 12px"
+          >
+            Scores are from the side-to-move's perspective. Higher is better.
+          </div>
+          <table
+            id="moveScoreTable"
+            style="
+              width: 100%;
+              border-collapse: collapse;
+              font-family:
+                ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+              font-size: 13px;
+            "
+          >
+            <thead>
+              <tr style="text-align: left; color: var(--muted)">
+                <th style="padding: 6px 8px">#</th>
+                <th style="padding: 6px 8px">Move</th>
+                <th style="padding: 6px 8px; text-align: right">Score</th>
+              </tr>
+            </thead>
+            <tbody id="moveScoreBody"></tbody>
+          </table>
+        </div>
+      </aside>
+
       <aside class="card">
         <div class="side">
           <input type="file" id="fileInput" accept=".json" />
@@ -406,7 +449,7 @@
       <aside class="card">
         <div class="side">
           <h3>Rat Guesses</h3>
-          <table>
+          <table id="rat">
             <tr>
               <th>Turn</th>
               <th>Player</th>
@@ -417,6 +460,9 @@
       </aside>
     </div>
 
+    <!-- Classic scripts: load order is guaranteed by document order. -->
+    <script src="game.js"></script>
+    <script src="minimax.js"></script>
     <script>
       document.querySelector('#fileInput').addEventListener('change', (e) => {
         const file = e.target.files[0];
@@ -601,6 +647,115 @@
             null,
             2,
           );
+
+          renderMinimaxPanel(turn);
+        }
+
+        // ── Reconstruct a game.js Board at a given display turn ───────────
+        function reconstructBoard(turn) {
+          if (!window.GAME) return null;
+          const { Board, Cell, Worker } = window.GAME;
+          const board = new Board(240, false);
+
+          // Blocked cells
+          for (const [x, y] of data.blocked_positions) {
+            if (inBounds(x, y)) board.set_cell([x, y], Cell.BLOCKED);
+          }
+          // Primed / carpet cells from the per-turn status array
+          const status = tileStatusByTurn[turn];
+          if (status) {
+            for (let y = 0; y < size; y++) {
+              for (let x = 0; x < size; x++) {
+                if (blocked.has(`${x},${y}`)) continue;
+                const s = status[toIdx(x, y)] || 0;
+                if (s === 1) board.set_cell([x, y], Cell.PRIMED);
+                else if (s === 2) board.set_cell([x, y], Cell.CARPET);
+              }
+            }
+          }
+
+          const aPos = data.a_pos[turn];
+          const bPos = data.b_pos[turn];
+          if (!aPos || !bPos) return null;
+
+          // The "player_worker" in a Board is the side to move.
+          // Turn 0 = initial, turn 1 = after A's first move, etc.
+          // Side to move at displayed turn t: A if t is even, else B.
+          const aToMove = turn % 2 === 0;
+          const a = new Worker([aPos[0], aPos[1]], true);
+          a.points = data.a_points[turn] ?? 0;
+          a.turns_left = data.a_turns_left[turn] ?? 0;
+          a.time_left = data.a_time_left[turn] ?? 0;
+          const b = new Worker([bPos[0], bPos[1]], false);
+          b.points = data.b_points[turn] ?? 0;
+          b.turns_left = data.b_turns_left[turn] ?? 0;
+          b.time_left = data.b_time_left[turn] ?? 0;
+
+          if (aToMove) {
+            board.player_worker = a;
+            board.opponent_worker = b;
+            board.is_player_a_turn = true;
+          } else {
+            board.player_worker = b;
+            board.opponent_worker = a;
+            board.is_player_a_turn = false;
+          }
+          board.turn_count = turn;
+          return { board, aToMove };
+        }
+
+        function renderMinimaxPanel(turn) {
+          const body = document.getElementById('moveScoreBody');
+          const badge = document.getElementById('minimaxPlayerBadge');
+          if (!body) return;
+          body.innerHTML = '';
+          if (!window.MINIMAX || !window.GAME) {
+            badge.textContent = 'minimax not loaded';
+            return;
+          }
+          const rec = reconstructBoard(turn);
+          if (!rec) {
+            badge.textContent = '—';
+            return;
+          }
+          const { board, aToMove } = rec;
+          badge.textContent = aToMove ? 'A to move' : 'B to move';
+
+          let ranked;
+          try {
+            ranked = window.MINIMAX.rankMoves(board, {
+              maxDepth: 6,
+              timeBudget: 350,
+            });
+          } catch (err) {
+            console.error(err);
+            const row = document.createElement('tr');
+            row.innerHTML = `<td colspan="3" style="padding:6px 8px;color:var(--b);">error: ${err.message}</td>`;
+            body.appendChild(row);
+            return;
+          }
+
+          if (!ranked.length) {
+            const row = document.createElement('tr');
+            row.innerHTML = `<td colspan="3" style="padding:6px 8px;color:var(--muted);">no legal moves</td>`;
+            body.appendChild(row);
+            return;
+          }
+
+          const max = ranked[0].score;
+          const min = ranked[ranked.length - 1].score;
+          for (let i = 0; i < ranked.length; i++) {
+            const r = ranked[i];
+            const row = document.createElement('tr');
+            row.style.borderTop = '1px solid rgba(255,255,255,0.06)';
+            const frac = max === min ? 1 : (r.score - min) / (max - min);
+            const hue = Math.round(frac * 120); // red→green
+            row.innerHTML =
+              `<td style="padding:6px 8px;color:var(--muted);">${i + 1}</td>` +
+              `<td style="padding:6px 8px;">${r.label}</td>` +
+              `<td style="padding:6px 8px;text-align:right;color:hsl(${hue},70%,65%);font-weight:700;">${r.score.toFixed(3)}</td>`;
+            body.appendChild(row);
+          }
         }
 
         function setTurn(turn) {
@@ -661,7 +816,7 @@
               row.appendChild(turnCell);
               row.appendChild(playerCell);
               row.appendChild(pointsCell);
-              document.querySelector('table').appendChild(row);
+              document.querySelector('#rat').appendChild(row);
             }
           }
         }
@@ -673,7 +828,7 @@
         sepCell.style.padding = '4px 0';
         sepCell.style.background = 'transparent';
         separator.appendChild(sepCell);
-        document.querySelector('table').appendChild(separator);
+        document.querySelector('#rat').appendChild(separator);
 
         for (let i = 1; i < data.b_points.length; i++) {
           if (
@@ -699,7 +854,7 @@
               row.appendChild(turnCell);
               row.appendChild(playerCell);
               row.appendChild(pointsCell);
-              document.querySelector('table').appendChild(row);
+              document.querySelector('#rat').appendChild(row);
             }
           }
         }

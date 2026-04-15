@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Match Viewer</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --panel: #151b2f;
+        --panel-2: #1d2540;
+        --text: #e8edf8;
+        --muted: #a9b4d0;
+        --grid: #5e6a8a;
+        --blocked: #6b7280;
+        --plain: #f8fafc;
+        --prime: #fde68a;
+        --carpet: #86efac;
+        --a: #60a5fa;
+        --b: #f87171;
+        --rat: #facc15;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family:
+          Inter,
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+        background: linear-gradient(180deg, var(--bg), #0f172a);
+        color: var(--text);
+      }
+
+      .wrap {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 24px;
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 20px;
+      }
+
+      .card {
+        background: rgba(21, 27, 47, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 20px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+        overflow: hidden;
+      }
+
+      .card h2,
+      .card h3 {
+        margin: 0;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+      }
+
+      .header {
+        padding: 18px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .sub {
+        color: var(--muted);
+        font-size: 14px;
+        margin-top: 6px;
+      }
+
+      .board-shell {
+        padding: 20px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .board {
+        display: grid;
+        grid-template-columns: repeat(8, 60px);
+        grid-template-rows: repeat(8, 60px);
+        gap: 6px;
+        background: rgba(255, 255, 255, 0.04);
+        padding: 8px;
+        border-radius: 18px;
+        position: relative;
+      }
+
+      .cell {
+        width: 60px;
+        height: 60px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 20px;
+        position: relative;
+        color: #111827;
+      }
+
+      .plain {
+        background: var(--plain);
+      }
+      .prime {
+        background: var(--prime);
+      }
+      .carpet {
+        background: var(--carpet);
+      }
+      .blocked {
+        background: var(--blocked);
+        color: white;
+      }
+
+      .coord {
+        position: absolute;
+        top: 4px;
+        left: 6px;
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(17, 24, 39, 0.55);
+        pointer-events: none;
+      }
+
+      .token {
+        width: 38px;
+        height: 38px;
+        border-radius: 999px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 18px;
+        border: 2px solid rgba(255, 255, 255, 0.75);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+        position: absolute;
+      }
+
+      .token.a {
+        background: var(--a);
+        transform: translate(-8px, 0);
+      }
+      .token.b {
+        background: var(--b);
+        transform: translate(8px, 0);
+      }
+      .token.rat {
+        width: 28px;
+        height: 28px;
+        font-size: 14px;
+        background: var(--rat);
+        color: #111827;
+        border-color: rgba(17, 24, 39, 0.25);
+        transform: translateY(14px);
+      }
+
+      .side {
+        padding: 20px;
+        display: grid;
+        gap: 16px;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+      }
+
+      .stat {
+        background: var(--panel-2);
+        border-radius: 16px;
+        padding: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      .label {
+        font-size: 12px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 8px;
+      }
+
+      .value {
+        font-size: 22px;
+        font-weight: 800;
+      }
+
+      .controls {
+        display: grid;
+        gap: 12px;
+      }
+
+      .btns {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        background: #2a355b;
+        color: var(--text);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        padding: 10px 14px;
+        cursor: pointer;
+        font-weight: 700;
+      }
+
+      button:hover {
+        filter: brightness(1.08);
+      }
+
+      input[type='range'] {
+        width: 100%;
+      }
+
+      .log {
+        background: #0f1529;
+        border-radius: 16px;
+        padding: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: #dbe5ff;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 999px;
+        padding: 8px 12px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        display: inline-block;
+      }
+
+      .wide {
+        grid-column: 1 / -1;
+      }
+
+      @media (max-width: 980px) {
+        .wrap {
+          grid-template-columns: 1fr;
+        }
+        .board {
+          grid-template-columns: repeat(8, 42px);
+          grid-template-rows: repeat(8, 42px);
+        }
+        .cell {
+          width: 42px;
+          height: 42px;
+          font-size: 16px;
+        }
+        .token {
+          width: 28px;
+          height: 28px;
+          font-size: 14px;
+        }
+        .token.rat {
+          width: 22px;
+          height: 22px;
+          font-size: 11px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <section class="card">
+        <div class="header">
+          <div>
+            <h2>Match Viewer</h2>
+            <div class="sub" id="summary"></div>
+          </div>
+          <div class="pill" id="turnBadge">Turn 0</div>
+        </div>
+        <div class="board-shell">
+          <div id="board" class="board"></div>
+        </div>
+      </section>
+
+      <aside class="card">
+        <div class="side">
+          <div class="controls">
+            <h3>Timeline</h3>
+            <input
+              id="slider"
+              type="range"
+              min="0"
+              max="0"
+              step="1"
+              value="0"
+            />
+            <div class="btns">
+              <button id="prevBtn">◀ Prev</button>
+              <button id="playBtn">▶ Play</button>
+              <button id="nextBtn">Next ▶</button>
+            </div>
+          </div>
+
+          <div class="stats">
+            <div class="stat">
+              <div class="label">A position</div>
+              <div class="value" id="aPos"></div>
+            </div>
+            <div class="stat">
+              <div class="label">B position</div>
+              <div class="value" id="bPos"></div>
+            </div>
+            <div class="stat">
+              <div class="label">A score / turns / time</div>
+              <div class="value" id="aStats"></div>
+            </div>
+            <div class="stat">
+              <div class="label">B score / turns / time</div>
+              <div class="value" id="bStats"></div>
+            </div>
+            <div class="stat">
+              <div class="label">Rat caught</div>
+              <div class="value" id="ratCaught"></div>
+            </div>
+            <div class="stat">
+              <div class="label">Left behind</div>
+              <div class="value" id="leftBehind"></div>
+            </div>
+          </div>
+
+          <div>
+            <h3 style="margin-bottom: 10px">Legend</h3>
+            <div class="legend">
+              <span class="pill"
+                ><span class="dot" style="background: var(--plain)"></span>
+                Plain</span
+              >
+              <span class="pill"
+                ><span class="dot" style="background: var(--prime)"></span>
+                Prime</span
+              >
+              <span class="pill"
+                ><span class="dot" style="background: var(--carpet)"></span>
+                Carpet</span
+              >
+              <span class="pill"
+                ><span class="dot" style="background: var(--blocked)"></span>
+                Blocked</span
+              >
+              <span class="pill"
+                ><span class="dot" style="background: var(--a)"></span> A</span
+              >
+              <span class="pill"
+                ><span class="dot" style="background: var(--b)"></span> B</span
+              >
+              <span class="pill"
+                ><span class="dot" style="background: var(--rat)"></span>
+                Rat</span
+              >
+            </div>
+          </div>
+
+          <div>
+            <h3 style="margin-bottom: 10px">Outcome</h3>
+            <div class="log" id="outcome"></div>
+          </div>
+
+          <div>
+            <h3 style="margin-bottom: 10px">Errors</h3>
+            <div class="log" id="errors"></div>
+          </div>
+        </div>
+      </aside>
+
+      <aside class="card">
+        <div class="side">
+          <input type="file" id="fileInput" accept=".json" multiple />
+        </div>
+      </aside>
+
+      <aside class="card">
+        <div class="side">
+          <h3>Rat Guesses</h3>
+          <table>
+            <tr>
+              <th>Turn</th>
+              <th>Player</th>
+              <th>Points</th>
+            </tr>
+          </table>
+        </div>
+      </aside>
+    </div>
+
+    <script>
+      function sum(arr) {
+        return arr.reduce((a, b) => a + b, 0);
+      }
+
+      document.querySelector('#fileInput').addEventListener('change', (e) => {
+        const files = e.target.files;
+        if (!files.length) return;
+
+        const d = [];
+        for (const file of files) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            try {
+              const data = JSON.parse(event.target.result);
+              d.push(load(data));
+            } catch (error) {
+              console.error('Error parsing JSON:', error);
+            }
+            if (d.length === files.length) {
+              console.log('A Rat Average', sum(d.map((x) => x[0])) / d.length);
+              console.log('B Rat Average', sum(d.map((x) => x[1])) / d.length);
+            }
+          };
+          reader.readAsText(file);
+        }
+      });
+
+      function load(data) {
+        let a_rat = 0;
+        let b_rat = 0;
+
+        for (let i = 1; i < data.a_points.length; i++) {
+          if (
+            JSON.stringify(data.a_pos[i]) === JSON.stringify(data.a_pos[i - 1])
+          ) {
+            if (
+              data.a_points[i] == data.a_points[i - 1] - 2 ||
+              data.a_points[i] == data.a_points[i - 1] + 4
+            ) {
+              a_rat += data.a_points[i] - data.a_points[i - 1];
+            }
+          }
+        }
+
+        for (let i = 1; i < data.b_points.length; i++) {
+          if (
+            JSON.stringify(data.b_pos[i]) === JSON.stringify(data.b_pos[i - 1])
+          ) {
+            if (
+              data.b_points[i] == data.b_points[i - 1] - 2 ||
+              data.b_points[i] == data.b_points[i - 1] + 4
+            ) {
+              b_rat += data.b_points[i] - data.b_points[i - 1];
+            }
+          }
+        }
+
+        return [a_rat, b_rat];
+      }
+    </script>
+  </body>
+</html>

@@ -63,7 +63,7 @@ class PlayerAgent:
             search_xy, search_ev = self.rat_belief.best_search_target()
             miss_ev = self.rat_belief.new_ev_if_miss()
             search_ev -= (
-                miss_ev * (1 - self.rat_belief.belief.max()) * 0.7
+                miss_ev * (1 - self.rat_belief.belief.max()) * 0.5
             )  # Compare against the EV of not searching at all
 
             if search_ev > 0:

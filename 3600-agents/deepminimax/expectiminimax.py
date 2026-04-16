@@ -399,7 +399,7 @@ class Expectiminimax:
         self.max_depth = max_depth
         self._nodes = 0
 
-    def search(self, board, rat_belief, time_left_fn, time_budget=1.0):
+    def search(self, board, rat_belief, time_budget=1.0):
         deadline = time.perf_counter() + time_budget
         self._deadline = deadline
         self._rat_belief = rat_belief

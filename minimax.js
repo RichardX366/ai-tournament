@@ -672,7 +672,7 @@
       if (val > best) {
         best = val;
         bestMk = moveKey(mv);
-        bestPV = [{ label: moveLabel(mv), side: ply % 2, pts: movePoints(mv) }, ...res.pv];
+        bestPV = [{ label: moveLabel(mv), side: ply % 2, pts: movePoints(mv), move: mv }, ...res.pv];
       }
       if (val > alpha) alpha = val;
       if (alpha >= beta) break;
@@ -734,7 +734,7 @@
         move: mv,
         score: val - evaluate(board),
         label: moveLabel(mv),
-        pv: [{ label: moveLabel(mv), side: 0, pts: movePoints(mv) }, ...res.pv],
+        pv: [{ label: moveLabel(mv), side: 0, pts: movePoints(mv), move: mv }, ...res.pv],
       });
     }
     results.sort((a, b) => b.score - a.score);

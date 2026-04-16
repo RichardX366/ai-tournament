@@ -289,7 +289,7 @@ def _evaluate(board):
         denial = min(0.5, 0.025 * (20 - turns_left) * min(score_diff, 12) / 12.0)
 
     v = (
-        3.0 * score_diff
+        2.0 * score_diff
         + 0.12 * turn_diff
         + 0.28 * (len(player_moves) - len(opponent_moves))
         + 0.95 * player_best_carpet
@@ -298,12 +298,12 @@ def _evaluate(board):
         + 0.35 * (player_prime_count - opponent_prime_count)
         + 0.22 * (player_openness - opponent_openness)
         + 0.14 * (player_center - opponent_center)
-        + 0.45 * player_extension
-        - (0.45 + denial) * opponent_extension
-        + 0.30 * lf_weight * player_lf
-        - (0.30 + denial * 0.5) * lf_weight * opponent_lf
-        + 0.20 * lf_weight * player_best_line
-        - (0.20 + denial * 0.3) * lf_weight * opponent_best_line
+        + 0.35 * player_extension
+        - (0.35 + denial) * opponent_extension
+        + 0.20 * lf_weight * player_lf
+        - (0.20 + denial * 0.5) * lf_weight * opponent_lf
+        + 0.10 * lf_weight * player_best_line
+        - (0.10 + denial * 0.3) * lf_weight * opponent_best_line
     )
 
     return v
@@ -462,7 +462,9 @@ class Expectiminimax:
         best_value = -_INF
 
         # Cap depth at remaining game turns so we find exact endgame scores
-        turns_remaining = board.player_worker.turns_left + board.opponent_worker.turns_left
+        turns_remaining = (
+            board.player_worker.turns_left + board.opponent_worker.turns_left
+        )
         effective_max = min(self.max_depth, max(1, turns_remaining))
 
         # Iterative deepening with PVS

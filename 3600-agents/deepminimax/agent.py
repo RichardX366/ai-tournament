@@ -26,7 +26,7 @@ class PlayerAgent:
         if transition_matrix is not None:
             self.rat_belief = RatBelief(transition_matrix)
 
-        self.searcher = Expectiminimax(max_depth=8)
+        self.searcher = Expectiminimax(max_depth=10)
         self.turn_number = 0
 
     def play(

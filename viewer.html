@@ -436,11 +436,38 @@
       </aside>
 
       <aside class="card">
-        <div class="side" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <div
+          class="side"
+          style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap"
+        >
           <input type="file" id="fileInput" accept=".json" />
-          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);">
+          <label
+            style="
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              font-size: 13px;
+              color: var(--muted);
+            "
+          >
             Max depth
-            <input type="number" id="maxDepthInput" value="6" min="1" max="20" style="width:56px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:var(--panel-2);color:var(--text);font-size:13px;font-weight:700;" />
+            <input
+              type="number"
+              id="maxDepthInput"
+              value="6"
+              min="1"
+              max="20"
+              style="
+                width: 56px;
+                padding: 6px 8px;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                background: var(--panel-2);
+                color: var(--text);
+                font-size: 13px;
+                font-weight: 700;
+              "
+            />
           </label>
         </div>
       </aside>
@@ -695,6 +722,93 @@
           return { board, aToMove };
         }
 
+        // Re-render just the visual board for a given turn (no minimax recalc)
+        function renderBoardOnly(turn) {
+          boardEl.innerHTML = '';
+          const aPos = data.a_pos[turn];
+          const bPos = data.b_pos[turn];
+          const ratPos =
+            data.rat_position_history[
+              Math.min(turn, data.rat_position_history.length - 1)
+            ];
+
+          for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+              const cell = document.createElement('div');
+              cell.className = `cell ${getTileType(x, y, turn)}`;
+
+              const coord = document.createElement('div');
+              coord.className = 'coord';
+              coord.textContent = `${x},${y}`;
+              cell.appendChild(coord);
+
+              if (aPos && aPos[0] === x && aPos[1] === y) {
+                const t = document.createElement('div');
+                t.className = 'token a';
+                t.textContent = 'A';
+                cell.appendChild(t);
+              }
+              if (bPos && bPos[0] === x && bPos[1] === y) {
+                const t = document.createElement('div');
+                t.className = 'token b';
+                t.textContent = 'B';
+                cell.appendChild(t);
+              }
+              if (ratPos && ratPos[0] === x && ratPos[1] === y) {
+                const t = document.createElement('div');
+                t.className = 'token rat';
+                t.textContent = 'r';
+                cell.appendChild(t);
+              }
+
+              boardEl.appendChild(cell);
+            }
+          }
+        }
+
+        // Render a game.js Board object onto the visual board grid
+        function renderBoardPreview(board, aToMove) {
+          boardEl.innerHTML = '';
+          const { Cell } = window.GAME;
+          const p = board.player_worker;
+          const o = board.opponent_worker;
+          // Map back to A/B based on who is "player" in this board
+          const aPos = aToMove ? p.get_location() : o.get_location();
+          const bPos = aToMove ? o.get_location() : p.get_location();
+
+          for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+              const cell = document.createElement('div');
+              const bit = 1n << BigInt(y * 8 + x);
+              let type = 'plain';
+              if ((board._blocked_mask & bit) !== 0n) type = 'blocked';
+              else if ((board._carpet_mask & bit) !== 0n) type = 'carpet';
+              else if ((board._primed_mask & bit) !== 0n) type = 'prime';
+              cell.className = `cell ${type}`;
+
+              const coord = document.createElement('div');
+              coord.className = 'coord';
+              coord.textContent = `${x},${y}`;
+              cell.appendChild(coord);
+
+              if (aPos && aPos[0] === x && aPos[1] === y) {
+                const t = document.createElement('div');
+                t.className = 'token a';
+                t.textContent = 'A';
+                cell.appendChild(t);
+              }
+              if (bPos && bPos[0] === x && bPos[1] === y) {
+                const t = document.createElement('div');
+                t.className = 'token b';
+                t.textContent = 'B';
+                cell.appendChild(t);
+              }
+
+              boardEl.appendChild(cell);
+            }
+          }
+        }
+
         function renderMinimaxPanel(turn) {
           const body = document.getElementById('moveScoreBody');
           const badge = document.getElementById('minimaxPlayerBadge');
@@ -715,8 +829,9 @@
           let ranked;
           try {
             ranked = window.MINIMAX.rankMoves(board, {
-              maxDepth: parseInt(document.getElementById('maxDepthInput')?.value) || 6,
-              timeBudget: 1000,
+              maxDepth:
+                parseInt(document.getElementById('maxDepthInput')?.value) || 6,
+              timeBudget: 10000,
             });
           } catch (err) {
             console.error(err);
@@ -755,25 +870,70 @@
             if (r.pv && r.pv.length > 1) {
               const pvRow = document.createElement('tr');
               pvRow.style.display = 'none';
-              const pvSteps = r.pv
-                .map((step, j) => {
-                  const who =
-                    step.side === 0
-                      ? `<span style="color:var(--a);font-weight:700;">You</span>`
-                      : `<span style="color:var(--b);font-weight:700;">Opp</span>`;
-                  const rawPts = step.pts || 0;
-                  const displayPts = step.side === 0 ? rawPts : -rawPts;
-                  const pts = rawPts
-                    ? ` <span style="color:${displayPts > 0 ? '#6f6' : displayPts < 0 ? '#f66' : 'var(--muted)'};font-size:11px;">(${displayPts > 0 ? '+' : ''}${displayPts})</span>`
-                    : '';
-                  return `${who} ${step.label}${pts}`;
-                })
-                .join(' <span style="color:var(--muted);">→</span> ');
-              pvRow.innerHTML =
-                `<td></td>` +
-                `<td colspan="2" style="padding:4px 8px 10px 20px;font-size:12px;color:var(--muted);line-height:1.6;">` +
-                `<span style="color:var(--muted);opacity:0.6;">PV:</span> ${pvSteps}` +
-                `</td>`;
+              const pvCell = document.createElement('td');
+              pvCell.colSpan = 2;
+              pvCell.style.cssText = 'padding:4px 8px 10px 20px;font-size:12px;color:var(--muted);line-height:1.6;';
+
+              const pvLabel = document.createElement('span');
+              pvLabel.style.cssText = 'color:var(--muted);opacity:0.6;';
+              pvLabel.textContent = 'PV: ';
+              pvCell.appendChild(pvLabel);
+
+              const currentTurn = turn;
+              const currentAToMove = aToMove;
+
+              r.pv.forEach((step, j) => {
+                if (j > 0) {
+                  const arrow = document.createElement('span');
+                  arrow.style.color = 'var(--muted)';
+                  arrow.innerHTML = ' → ';
+                  pvCell.appendChild(arrow);
+                }
+
+                const span = document.createElement('span');
+                span.style.cssText = 'cursor:pointer;padding:2px 4px;border-radius:4px;transition:background 0.15s;';
+                const who = step.side === 0
+                  ? `<span style="color:var(--a);font-weight:700;">You</span>`
+                  : `<span style="color:var(--b);font-weight:700;">Opp</span>`;
+                const rawPts = step.pts || 0;
+                const displayPts = step.side === 0 ? rawPts : -rawPts;
+                const pts = rawPts
+                  ? ` <span style="color:${displayPts > 0 ? '#6f6' : displayPts < 0 ? '#f66' : 'var(--muted)'};font-size:11px;">(${displayPts > 0 ? '+' : ''}${displayPts})</span>`
+                  : '';
+                span.innerHTML = `${who} ${step.label}${pts}`;
+
+                span.addEventListener('mouseenter', () => {
+                  span.style.background = 'rgba(255,255,255,0.1)';
+                  // Apply moves 0..j to the reconstructed board
+                  const rec2 = reconstructBoard(currentTurn);
+                  if (!rec2) return;
+                  let b = rec2.board;
+                  let flipped = false; // tracks if perspective is reversed relative to original
+                  for (let k = 0; k <= j; k++) {
+                    const mv = r.pv[k].move;
+                    if (!mv) break;
+                    const child = b.forecast_move(mv, true);
+                    if (!child) break;
+                    child.reverse_perspective();
+                    b = child;
+                    flipped = !flipped;
+                  }
+                  // If flipped odd times, player/opponent are swapped relative to aToMove
+                  renderBoardPreview(b, flipped ? !currentAToMove : currentAToMove);
+                });
+
+                span.addEventListener('mouseleave', () => {
+                  span.style.background = '';
+                  // Re-render just the board, not the minimax panel
+                  renderBoardOnly(currentTurn);
+                });
+
+                pvCell.appendChild(span);
+              });
+
+              const emptyCell = document.createElement('td');
+              pvRow.appendChild(emptyCell);
+              pvRow.appendChild(pvCell);
               body.appendChild(pvRow);
 
               row.addEventListener('click', () => {
@@ -799,6 +959,11 @@
           setTurn(Number(slider.value) + 1),
         );
         slider.addEventListener('input', () => render(Number(slider.value)));
+        document
+          .getElementById('maxDepthInput')
+          .addEventListener('change', () =>
+            renderMinimaxPanel(Number(slider.value)),
+          );
 
         playBtn.addEventListener('click', () => {
           if (timer) {

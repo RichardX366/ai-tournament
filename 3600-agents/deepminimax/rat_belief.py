@@ -204,6 +204,19 @@ class RatBelief:
         xy = _idx_to_xy(idx)
         return xy, self.ev_search(xy)
 
+    def new_ev_if_miss(self) -> float:
+        """EV of the best cell after the current best guess misses.
+        Does not include the -2 penalty from the missed guess itself."""
+        idx = int(jnp.argmax(self.belief))
+        miss_belief = self.belief.at[idx].set(0.0)
+        s = miss_belief.sum()
+        if s > 1e-12:
+            miss_belief = miss_belief / s
+        else:
+            miss_belief = self._spawn_prior
+        new_best_p = float(miss_belief.max())
+        return 6.0 * new_best_p - 2.0
+
     def should_search(self, threshold: float = 0.0) -> bool:
         """True if best search EV exceeds threshold."""
         _, best_ev = self.best_search_target()

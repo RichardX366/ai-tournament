@@ -73,6 +73,53 @@
     return 1n << BigInt(y * 8 + x);
   }
 
+  // --- Line freedom: primable corridor potential -------------------------
+  function lineFreedom(board, loc, playerLoc, oppLoc) {
+    const [x, y] = loc;
+    const blocked = board._blocked_mask;
+    const primed = board._primed_mask;
+    const carpet = board._carpet_mask;
+    const occupied = blocked | primed | carpet;
+    const [px, py] = playerLoc;
+    const [ox, oy] = oppLoc;
+
+    let total = 0;
+    let bestRunway = 0;
+
+    const axes = [
+      [[0, -1], [0, 1]],   // vertical: UP / DOWN
+      [[-1, 0], [1, 0]],   // horizontal: LEFT / RIGHT
+    ];
+
+    for (const [[dx1, dy1], [dx2, dy2]] of axes) {
+      let count1 = 0;
+      let cx = x + dx1, cy = y + dy1;
+      while (cx >= 0 && cx < 8 && cy >= 0 && cy < 8) {
+        const bit = bitAt(cx, cy);
+        if ((occupied & bit) || (cx === px && cy === py) || (cx === ox && cy === oy)) break;
+        count1++;
+        cx += dx1; cy += dy1;
+      }
+
+      let count2 = 0;
+      cx = x + dx2; cy = y + dy2;
+      while (cx >= 0 && cx < 8 && cy >= 0 && cy < 8) {
+        const bit = bitAt(cx, cy);
+        if ((occupied & bit) || (cx === px && cy === py) || (cx === ox && cy === oy)) break;
+        count2++;
+        cx += dx2; cy += dy2;
+      }
+
+      const selfOk = (occupied & bitAt(x, y)) ? 0 : 1;
+      const runway = count1 + count2 + selfOk;
+
+      if (runway > bestRunway) bestRunway = runway;
+      if (runway >= 2) total += CARPET_EVALUATIONS[Math.min(runway, 7)];
+    }
+
+    return { total, bestRunway };
+  }
+
   // --- Line extension value (port of _ext) -------------------------------
   function ext(board, loc, playerLoc, oppLoc) {
     const [x, y] = loc;
@@ -232,16 +279,42 @@
     const playerExt = ext(board, [px, py], [px, py], [ox, oy]);
     const oppExt = ext(board, [ox, oy], [px, py], [ox, oy]);
 
+    // Line freedom: mid-game only (ramp in 10→20, full 20→55, ramp out 55→65)
+    const tc = board.turn_count;
+    let lfWeight;
+    if (tc < 10)       lfWeight = 0;
+    else if (tc < 20)  lfWeight = (tc - 10) / 10;
+    else if (tc < 55)  lfWeight = 1;
+    else if (tc < 65)  lfWeight = (65 - tc) / 10;
+    else               lfWeight = 0;
+
+    let pLFtotal = 0, oLFtotal = 0, pLFbest = 0, oLFbest = 0;
+    if (lfWeight > 0) {
+      const pLF = lineFreedom(board, [px, py], [px, py], [ox, oy]);
+      const oLF = lineFreedom(board, [ox, oy], [px, py], [ox, oy]);
+      pLFtotal = pLF.total;  oLFtotal = oLF.total;
+      pLFbest = pLF.bestRunway; oLFbest = oLF.bestRunway;
+    }
+
+    // Denial: when ahead in late game, penalize opponent's positional terms more
+    const turnsLeft = Math.max(1, player.turns_left);
+    let denial = 0;
+    if (scoreDiff > 0 && turnsLeft <= 20) {
+      denial = Math.min(0.5, 0.025 * (20 - turnsLeft) * Math.min(scoreDiff, 12) / 12);
+    }
+
     return (
       3.0 * scoreDiff +
       0.12 * turnDiff +
       0.28 * (playerMoves.length - opponentMoves.length) +
-      0.95 * (pBest - oBest) +
+      0.95 * pBest - (0.95 + denial) * oBest +
       0.18 * (pSum - oSum) +
       0.35 * (pPrime - oPrime) +
       0.22 * (playerOpen - oppOpen) +
       0.14 * (playerCenter - oppCenter) +
-      0.45 * (playerExt - oppExt)
+      0.45 * playerExt - (0.45 + denial) * oppExt +
+      0.30 * lfWeight * pLFtotal - (0.30 + denial * 0.5) * lfWeight * oLFtotal +
+      0.20 * lfWeight * pLFbest - (0.20 + denial * 0.3) * lfWeight * oLFbest
     );
   }
 
@@ -406,26 +479,80 @@
     }
   }
 
+  // --- PV-returning negamax -----------------------------------------------
+  // Returns { value, pv: [ { label, side } , ... ] }
+  // Each pv entry records the move label and which side played it.
+  // "side" alternates: 0 = side-to-move at that node, 1 = opponent, …
+  function negamaxPV(board, depth, alpha, beta, deadline, ply) {
+    if (
+      depth <= 0 ||
+      board.is_game_over() ||
+      (typeof performance !== 'undefined' ? performance.now() : Date.now()) >=
+        deadline
+    ) {
+      return { value: evaluate(board), pv: [] };
+    }
+    const moves = board.get_valid_moves(false, true);
+    if (!moves.length) return { value: evaluate(board), pv: [] };
+    const ordered = orderMovesFast(board, moves);
+
+    let best = -INF;
+    let bestPV = [];
+    for (let i = 0; i < ordered.length; i++) {
+      if (
+        (typeof performance !== 'undefined'
+          ? performance.now()
+          : Date.now()) >= deadline
+      )
+        break;
+      const mv = ordered[i];
+      const child = board.forecast_move(mv, true);
+      if (!child) continue;
+      child.reverse_perspective();
+
+      const res = negamaxPV(child, depth - 1, -beta, -alpha, deadline, ply + 1);
+      const val = -res.value;
+
+      if (val > best) {
+        best = val;
+        bestPV = [{ label: moveLabel(mv), side: ply % 2 }, ...res.pv];
+      }
+      if (val > alpha) alpha = val;
+      if (alpha >= beta) break;
+    }
+    if (best <= -1e17) return { value: evaluate(board), pv: [] };
+    return { value: best, pv: bestPV };
+  }
+
   // --- Ranked root moves for UI -----------------------------------------
-  // Score = value for the current player after applying that move and
-  // searching (maxDepth - 1) more plies from the opponent's perspective.
+  // Returns [{ move, score, label, pv }] sorted by score.
+  // pv is the principal variation: array of { label, side } where
+  // side 0 = current player, side 1 = opponent.
   function rankMoves(board, opts = {}) {
     const maxDepth = opts.maxDepth ?? 3;
     const timeBudget = opts.timeBudget ?? 400; // ms
     const moves = board.get_valid_moves(false, true);
     if (!moves.length) return [];
 
-    const searcher = new Expectiminimax(maxDepth);
-    searcher._deadline = searcher._now() + timeBudget;
+    const now =
+      typeof performance !== 'undefined'
+        ? performance.now()
+        : Date.now();
+    const deadline = now + timeBudget;
 
     const results = [];
     for (const mv of moves) {
       const child = board.forecast_move(mv, true);
       if (!child) continue;
       child.reverse_perspective();
-      // Negate so score is from current player's perspective.
-      const val = -searcher._negamax(child, maxDepth - 1, -INF, INF);
-      results.push({ move: mv, score: val, label: moveLabel(mv) });
+      const res = negamaxPV(child, maxDepth - 1, -INF, INF, deadline, 1);
+      const val = -res.value;
+      results.push({
+        move: mv,
+        score: val,
+        label: moveLabel(mv),
+        pv: [{ label: moveLabel(mv), side: 0 }, ...res.pv],
+      });
     }
     results.sort((a, b) => b.score - a.score);
     return results;

@@ -221,19 +221,116 @@ def _evaluate(board, rat_belief):
     player_extension = _ext(board, player_loc, player_loc, opponent_loc)
     opponent_extension = _ext(board, opponent_loc, player_loc, opponent_loc)
 
+    # Line freedom: only relevant mid-game (turns 16–60 of 80).
+    # Ramp in from turn 10→20, full weight 20→55, ramp out 55→65.
+    tc = board.turn_count
+    if tc < 10:
+        lf_weight = 0.0
+    elif tc < 20:
+        lf_weight = (tc - 10) / 10.0
+    elif tc < 55:
+        lf_weight = 1.0
+    elif tc < 65:
+        lf_weight = (65 - tc) / 10.0
+    else:
+        lf_weight = 0.0
+
+    if lf_weight > 0:
+        player_lf, player_best_line = _line_freedom(
+            board, player_loc, player_loc, opponent_loc
+        )
+        opponent_lf, opponent_best_line = _line_freedom(
+            board, opponent_loc, player_loc, opponent_loc
+        )
+    else:
+        player_lf = opponent_lf = 0.0
+        player_best_line = opponent_best_line = 0
+
+    # Denial: when ahead in late game, increase weight on opponent's
+    # positional terms to actively block their scoring opportunities.
+    turns_left = max(1, player.turns_left)
+    denial = 0.0
+    if score_diff > 0 and turns_left <= 20:
+        denial = min(0.5, 0.025 * (20 - turns_left) * min(score_diff, 12) / 12.0)
+
     v = (
         3.0 * score_diff
         + 0.12 * turn_diff
         + 0.28 * (len(player_moves) - len(opponent_moves))
-        + 0.95 * (player_best_carpet - opponent_best_carpet)
+        + 0.95 * player_best_carpet - (0.95 + denial) * opponent_best_carpet
         + 0.18 * (player_carpet_sum - opponent_carpet_sum)
         + 0.35 * (player_prime_count - opponent_prime_count)
         + 0.22 * (player_openness - opponent_openness)
         + 0.14 * (player_center - opponent_center)
-        + 0.45 * (player_extension - opponent_extension)
+        + 0.45 * player_extension - (0.45 + denial) * opponent_extension
+        + 0.30 * lf_weight * player_lf - (0.30 + denial * 0.5) * lf_weight * opponent_lf
+        + 0.20 * lf_weight * player_best_line - (0.20 + denial * 0.3) * lf_weight * opponent_best_line
     )
 
+    # Rat proximity — numpy vectorized
+    # if rat_belief is not None:
+    #     belief = rat_belief.belief
+    #     player_idx = player_y * 8 + player_x
+    #     opponent_idx = opponent_y * 8 + opponent_x
+    #     v += 0.10 * float(
+    #         np.dot(
+    #             belief,
+    #             _DISTANCES[opponent_idx].astype(np.float64)
+    #             - _DISTANCES[player_idx].astype(np.float64),
+    #         )
+    #     )
+
     return v
+
+
+def _line_freedom(board, loc, player_loc, opp_loc):
+    """Score primable corridor potential: long SPACE lines through/near loc."""
+    x, y = loc
+    blocked = board._blocked_mask
+    primed = board._primed_mask
+    carpet = board._carpet_mask
+    occupied = blocked | primed | carpet
+    px, py = player_loc
+    ox, oy = opp_loc
+
+    total = 0.0
+    best_runway = 0
+
+    # Two axes: vertical (UP/DOWN) and horizontal (LEFT/RIGHT)
+    axes = (((0, -1), (0, 1)), ((-1, 0), (1, 0)))
+
+    for (dx1, dy1), (dx2, dy2) in axes:
+        count1 = 0
+        cx, cy = x + dx1, y + dy1
+        while 0 <= cx < 8 and 0 <= cy < 8:
+            bit = 1 << (cy * 8 + cx)
+            if (occupied & bit) or (cx == px and cy == py) or (cx == ox and cy == oy):
+                break
+            count1 += 1
+            cx += dx1
+            cy += dy1
+
+        count2 = 0
+        cx, cy = x + dx2, y + dy2
+        while 0 <= cx < 8 and 0 <= cy < 8:
+            bit = 1 << (cy * 8 + cx)
+            if (occupied & bit) or (cx == px and cy == py) or (cx == ox and cy == oy):
+                break
+            count2 += 1
+            cx += dx2
+            cy += dy2
+
+        # Include self if primable
+        bit_self = 1 << (y * 8 + x)
+        self_ok = 0 if (occupied & bit_self) else 1
+        runway = count1 + count2 + self_ok
+
+        if runway > best_runway:
+            best_runway = runway
+        if runway >= 2:
+            total += _CARPET_EVALUATIONS[min(runway, 7)]
+
+    return total, best_runway
 
 
 def _ext(board, loc, player_loc, opp_loc):
@@ -302,7 +399,7 @@ class Expectiminimax:
         self.max_depth = max_depth
         self._nodes = 0
 
-    def search(self, board, rat_belief, time_budget=1.0):
+    def search(self, board, rat_belief, time_left_fn, time_budget=1.0):
         deadline = time.perf_counter() + time_budget
         self._deadline = deadline
         self._rat_belief = rat_belief
@@ -373,25 +470,6 @@ class Expectiminimax:
                     ordered.insert(0, d_best)
             if not done:
                 break
-        # Decide: movement vs search
-        if rat_belief is not None and search_moves:
-            best_search_xy, search_ev = rat_belief.best_search_target()
-            turns_left = board.player_worker.turns_left
-
-            if turns_left > 25:
-                threshold = 2.0
-            elif turns_left > 15:
-                threshold = 1.0
-            elif turns_left > 5:
-                threshold = 0.5
-            else:
-                threshold = 0.0
-
-            if search_ev > threshold:
-                search_value = search_ev / 42.0
-                if search_value > best_value + 0.05:
-                    return Move.search(best_search_xy), search_value
-
         return best_move, best_value
 
     def _negamax(self, board, depth, alpha, beta):

@@ -31,6 +31,23 @@
 
   const INF = Infinity;
 
+  // --- Transposition table constants ------------------------------------
+  const TT_EXACT = 0;
+  const TT_LOWER = 1; // score is a lower bound (beta cutoff)
+  const TT_UPPER = 2; // score is an upper bound (alpha cutoff)
+  const TT_MAX_SIZE = 1 << 18; // 262144 entries
+
+  function boardKey(board) {
+    const p = board.player_worker;
+    const o = board.opponent_worker;
+    // Use a string key — fast and collision-free for Map lookups
+    return `${board._primed_mask},${board._carpet_mask},${p.position[0]},${p.position[1]},${o.position[0]},${o.position[1]},${p.points},${o.points},${p.turns_left},${o.turns_left}`;
+  }
+
+  function moveKey(mv) {
+    return `${mv.move_type},${mv.direction},${mv.roll_length || 0}`;
+  }
+
   // --- Carpet evaluation table (matches expectiminimax.py) ---------------
   const CARPET_PTS = [0, -1, 2, 4, 6, 10, 15, 21];
   const CARPET_EVALUATIONS = [0.0, -1.0];
@@ -87,27 +104,47 @@
     let bestRunway = 0;
 
     const axes = [
-      [[0, -1], [0, 1]],   // vertical: UP / DOWN
-      [[-1, 0], [1, 0]],   // horizontal: LEFT / RIGHT
+      [
+        [0, -1],
+        [0, 1],
+      ], // vertical: UP / DOWN
+      [
+        [-1, 0],
+        [1, 0],
+      ], // horizontal: LEFT / RIGHT
     ];
 
     for (const [[dx1, dy1], [dx2, dy2]] of axes) {
       let count1 = 0;
-      let cx = x + dx1, cy = y + dy1;
+      let cx = x + dx1,
+        cy = y + dy1;
       while (cx >= 0 && cx < 8 && cy >= 0 && cy < 8) {
         const bit = bitAt(cx, cy);
-        if ((occupied & bit) !== 0n || (cx === px && cy === py) || (cx === ox && cy === oy)) break;
+        if (
+          (occupied & bit) !== 0n ||
+          (cx === px && cy === py) ||
+          (cx === ox && cy === oy)
+        )
+          break;
         count1++;
-        cx += dx1; cy += dy1;
+        cx += dx1;
+        cy += dy1;
       }
 
       let count2 = 0;
-      cx = x + dx2; cy = y + dy2;
+      cx = x + dx2;
+      cy = y + dy2;
       while (cx >= 0 && cx < 8 && cy >= 0 && cy < 8) {
         const bit = bitAt(cx, cy);
-        if ((occupied & bit) !== 0n || (cx === px && cy === py) || (cx === ox && cy === oy)) break;
+        if (
+          (occupied & bit) !== 0n ||
+          (cx === px && cy === py) ||
+          (cx === ox && cy === oy)
+        )
+          break;
         count2++;
-        cx += dx2; cy += dy2;
+        cx += dx2;
+        cy += dy2;
       }
 
       const selfOk = (occupied & bitAt(x, y)) !== 0n ? 0 : 1;
@@ -148,7 +185,13 @@
       let primedBehind = 0;
       let bx = x + odx,
         by = y + ody;
-      while (bx >= 0 && bx < 8 && by >= 0 && by < 8 && (primed & bitAt(bx, by)) !== 0n) {
+      while (
+        bx >= 0 &&
+        bx < 8 &&
+        by >= 0 &&
+        by < 8 &&
+        (primed & bitAt(bx, by)) !== 0n
+      ) {
         primedBehind++;
         bx += odx;
         by += ody;
@@ -282,39 +325,51 @@
     // Line freedom: mid-game only (ramp in 10→20, full 20→55, ramp out 55→65)
     const tc = board.turn_count;
     let lfWeight;
-    if (tc < 10)       lfWeight = 0;
-    else if (tc < 20)  lfWeight = (tc - 10) / 10;
-    else if (tc < 55)  lfWeight = 1;
-    else if (tc < 65)  lfWeight = (65 - tc) / 10;
-    else               lfWeight = 0;
+    if (tc < 10) lfWeight = 0;
+    else if (tc < 20) lfWeight = (tc - 10) / 10;
+    else if (tc < 55) lfWeight = 1;
+    else if (tc < 65) lfWeight = (65 - tc) / 10;
+    else lfWeight = 0;
 
-    let pLFtotal = 0, oLFtotal = 0, pLFbest = 0, oLFbest = 0;
+    let pLFtotal = 0,
+      oLFtotal = 0,
+      pLFbest = 0,
+      oLFbest = 0;
     if (lfWeight > 0) {
       const pLF = lineFreedom(board, [px, py], [px, py], [ox, oy]);
       const oLF = lineFreedom(board, [ox, oy], [px, py], [ox, oy]);
-      pLFtotal = pLF.total;  oLFtotal = oLF.total;
-      pLFbest = pLF.bestRunway; oLFbest = oLF.bestRunway;
+      pLFtotal = pLF.total;
+      oLFtotal = oLF.total;
+      pLFbest = pLF.bestRunway;
+      oLFbest = oLF.bestRunway;
     }
 
     // Denial: when ahead in late game, penalize opponent's positional terms more
     const turnsLeft = Math.max(1, player.turns_left);
     let denial = 0;
     if (scoreDiff > 0 && turnsLeft <= 20) {
-      denial = Math.min(0.5, 0.025 * (20 - turnsLeft) * Math.min(scoreDiff, 12) / 12);
+      denial = Math.min(
+        0.5,
+        (0.025 * (20 - turnsLeft) * Math.min(scoreDiff, 12)) / 12,
+      );
     }
 
     return (
       3.0 * scoreDiff +
       0.12 * turnDiff +
       0.28 * (playerMoves.length - opponentMoves.length) +
-      0.95 * pBest - (0.95 + denial) * oBest +
+      0.95 * pBest -
+      (0.95 + denial) * oBest +
       0.18 * (pSum - oSum) +
       0.35 * (pPrime - oPrime) +
       0.22 * (playerOpen - oppOpen) +
       0.14 * (playerCenter - oppCenter) +
-      0.45 * playerExt - (0.45 + denial) * oppExt +
-      0.30 * lfWeight * pLFtotal - (0.30 + denial * 0.5) * lfWeight * oLFtotal +
-      0.20 * lfWeight * pLFbest - (0.20 + denial * 0.3) * lfWeight * oLFbest
+      0.45 * playerExt -
+      (0.45 + denial) * oppExt +
+      0.3 * lfWeight * pLFtotal -
+      (0.3 + denial * 0.5) * lfWeight * oLFtotal +
+      0.2 * lfWeight * pLFbest -
+      (0.2 + denial * 0.3) * lfWeight * oLFbest
     );
   }
 
@@ -337,7 +392,13 @@
         const [odx, ody] = DIR_MOVEMENTS[opp];
         const bx = px + odx,
           by = py + ody;
-        if (bx >= 0 && bx < 8 && by >= 0 && by < 8 && (primed & bitAt(bx, by)) !== 0n) {
+        if (
+          bx >= 0 &&
+          bx < 8 &&
+          by >= 0 &&
+          by < 8 &&
+          (primed & bitAt(bx, by)) !== 0n
+        ) {
           score += 4;
         }
       }
@@ -374,7 +435,9 @@
     constructor(maxDepth = 4) {
       this.maxDepth = maxDepth;
       this._nodes = 0;
+      this._ttHits = 0;
       this._deadline = Infinity;
+      this._tt = new Map(); // boardKey → { score, depth, flag, bestMk }
     }
 
     _now() {
@@ -386,6 +449,10 @@
     search(board, timeBudgetMs = 500) {
       this._deadline = this._now() + timeBudgetMs;
       this._nodes = 0;
+      this._ttHits = 0;
+
+      // Cap TT size
+      if (this._tt.size > TT_MAX_SIZE) this._tt.clear();
 
       const moves = board.get_valid_moves(false, true);
       if (!moves.length) return { move: Move.plain(Direction.UP), value: 0 };
@@ -396,7 +463,12 @@
       let bestMove = ordered[0];
       let bestValue = -INF;
 
-      for (let depth = 1; depth <= this.maxDepth; depth++) {
+      // Cap depth at remaining game turns
+      const turnsRemaining =
+        board.player_worker.turns_left + board.opponent_worker.turns_left;
+      const effectiveMax = Math.min(this.maxDepth, Math.max(1, turnsRemaining));
+
+      for (let depth = 1; depth <= effectiveMax; depth++) {
         if (this._now() >= this._deadline) break;
         let alpha = -INF;
         const beta = INF;
@@ -450,11 +522,50 @@
       if (depth <= 0 || board.is_game_over() || this._now() >= this._deadline) {
         return evaluate(board);
       }
+
+      // ── TT probe ──────────────────────────────────────────────────
+      const key = boardKey(board);
+      const ttEntry = this._tt.get(key);
+      let ttBestMk = null;
+
+      if (ttEntry !== undefined) {
+        if (ttEntry.depth >= depth) {
+          if (ttEntry.flag === TT_EXACT) {
+            this._ttHits++;
+            return ttEntry.score;
+          }
+          if (ttEntry.flag === TT_LOWER && ttEntry.score >= beta) {
+            this._ttHits++;
+            return ttEntry.score;
+          }
+          if (ttEntry.flag === TT_UPPER && ttEntry.score <= alpha) {
+            this._ttHits++;
+            return ttEntry.score;
+          }
+        }
+        ttBestMk = ttEntry.bestMk;
+      }
+
+      // ── Generate & order moves ────────────────────────────────────
       const moves = board.get_valid_moves(false, true);
       if (!moves.length) return evaluate(board);
       const ordered = orderMovesFast(board, moves);
 
+      // Promote TT best move to front
+      if (ttBestMk !== null) {
+        for (let i = 0; i < ordered.length; i++) {
+          if (moveKey(ordered[i]) === ttBestMk) {
+            if (i > 0) ordered.unshift(ordered.splice(i, 1)[0]);
+            break;
+          }
+        }
+      }
+
+      // ── Search ────────────────────────────────────────────────────
+      const origAlpha = alpha;
       let best = -INF;
+      let bestMk = ordered.length ? moveKey(ordered[0]) : null;
+
       for (let i = 0; i < ordered.length; i++) {
         if (this._now() >= this._deadline) break;
         const mv = ordered[i];
@@ -471,38 +582,75 @@
             val = -this._negamax(child, depth - 1, -beta, -alpha);
           }
         }
-        if (val > best) best = val;
+        if (val > best) {
+          best = val;
+          bestMk = moveKey(mv);
+        }
         if (val > alpha) alpha = val;
         if (alpha >= beta) break;
       }
+
+      // ── TT store ──────────────────────────────────────────────────
+      if (best > -1e17) {
+        let flag;
+        if (best <= origAlpha) flag = TT_UPPER;
+        else if (best >= beta) flag = TT_LOWER;
+        else flag = TT_EXACT;
+
+        if (ttEntry === undefined || depth >= ttEntry.depth) {
+          this._tt.set(key, { score: best, depth, flag, bestMk });
+        }
+      }
+
       return best > -1e17 ? best : evaluate(board);
     }
   }
 
+  // --- Move points (actual game points from a move) -------------------------
+  function movePoints(mv) {
+    if (mv.move_type === MoveType.CARPET)
+      return CARPET_POINTS_TABLE[mv.roll_length] ?? 0;
+    if (mv.move_type === MoveType.PRIME) return 1;
+    return 0;
+  }
+
   // --- PV-returning negamax -----------------------------------------------
-  // Returns { value, pv: [ { label, side } , ... ] }
-  // Each pv entry records the move label and which side played it.
-  // "side" alternates: 0 = side-to-move at that node, 1 = opponent, …
-  function negamaxPV(board, depth, alpha, beta, deadline, ply) {
-    if (
-      depth <= 0 ||
-      board.is_game_over() ||
-      (typeof performance !== 'undefined' ? performance.now() : Date.now()) >=
-        deadline
-    ) {
+  // Returns { value, pv: [ { label, side, pts } , ... ] }
+  // Each pv entry records the move label, which side played it, and the
+  // immediate game points scored by that move.
+  // tt is a shared Map for transposition table lookups (move ordering only
+  // in PV mode — we never cut short because we need the full PV).
+  function negamaxPV(board, depth, alpha, beta, deadline, ply, tt) {
+    const now =
+      typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (depth <= 0 || board.is_game_over() || now >= deadline) {
       return { value: evaluate(board), pv: [] };
     }
     const moves = board.get_valid_moves(false, true);
     if (!moves.length) return { value: evaluate(board), pv: [] };
     const ordered = orderMovesFast(board, moves);
 
+    // Use TT for move ordering (but not cutoffs — we need the PV)
+    const key = boardKey(board);
+    const ttEntry = tt ? tt.get(key) : undefined;
+    if (ttEntry !== undefined && ttEntry.bestMk !== null) {
+      for (let i = 0; i < ordered.length; i++) {
+        if (moveKey(ordered[i]) === ttEntry.bestMk) {
+          if (i > 0) ordered.unshift(ordered.splice(i, 1)[0]);
+          break;
+        }
+      }
+    }
+
     let best = -INF;
     let bestPV = [];
+    let bestMk = ordered.length ? moveKey(ordered[0]) : null;
+    const origAlpha = alpha;
+
     for (let i = 0; i < ordered.length; i++) {
       if (
-        (typeof performance !== 'undefined'
-          ? performance.now()
-          : Date.now()) >= deadline
+        (typeof performance !== 'undefined' ? performance.now() : Date.now()) >=
+        deadline
       )
         break;
       const mv = ordered[i];
@@ -510,16 +658,37 @@
       if (!child) continue;
       child.reverse_perspective();
 
-      const res = negamaxPV(child, depth - 1, -beta, -alpha, deadline, ply + 1);
+      const res = negamaxPV(
+        child,
+        depth - 1,
+        -beta,
+        -alpha,
+        deadline,
+        ply + 1,
+        tt,
+      );
       const val = -res.value;
 
       if (val > best) {
         best = val;
-        bestPV = [{ label: moveLabel(mv), side: ply % 2 }, ...res.pv];
+        bestMk = moveKey(mv);
+        bestPV = [{ label: moveLabel(mv), side: ply % 2, pts: movePoints(mv) }, ...res.pv];
       }
       if (val > alpha) alpha = val;
       if (alpha >= beta) break;
     }
+
+    // Store in TT for move ordering benefit in subsequent calls
+    if (tt && best > -1e17) {
+      let flag;
+      if (best <= origAlpha) flag = TT_UPPER;
+      else if (best >= beta) flag = TT_LOWER;
+      else flag = TT_EXACT;
+      if (ttEntry === undefined || depth >= ttEntry.depth) {
+        tt.set(key, { score: best, depth, flag, bestMk });
+      }
+    }
+
     if (best <= -1e17) return { value: evaluate(board), pv: [] };
     return { value: best, pv: bestPV };
   }
@@ -534,24 +703,38 @@
     const moves = board.get_valid_moves(false, true);
     if (!moves.length) return [];
 
+    // Cap depth at remaining game turns
+    const turnsRemaining =
+      board.player_worker.turns_left + board.opponent_worker.turns_left;
+    const effectiveMax = Math.min(maxDepth, Math.max(1, turnsRemaining));
+
     const now =
-      typeof performance !== 'undefined'
-        ? performance.now()
-        : Date.now();
+      typeof performance !== 'undefined' ? performance.now() : Date.now();
     const deadline = now + timeBudget;
+
+    // Shared TT across all root move searches for move ordering benefit
+    const tt = new Map();
 
     const results = [];
     for (const mv of moves) {
       const child = board.forecast_move(mv, true);
       if (!child) continue;
       child.reverse_perspective();
-      const res = negamaxPV(child, maxDepth - 1, -INF, INF, deadline, 1);
+      const res = negamaxPV(
+        child,
+        effectiveMax - 1,
+        -INF,
+        INF,
+        deadline,
+        1,
+        tt,
+      );
       const val = -res.value;
       results.push({
         move: mv,
-        score: val,
+        score: val - evaluate(board),
         label: moveLabel(mv),
-        pv: [{ label: moveLabel(mv), side: 0 }, ...res.pv],
+        pv: [{ label: moveLabel(mv), side: 0, pts: movePoints(mv) }, ...res.pv],
       });
     }
     results.sort((a, b) => b.score - a.score);

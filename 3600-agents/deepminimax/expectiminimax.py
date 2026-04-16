@@ -21,6 +21,12 @@ _CARPET_EVALUATIONS = [0.0, -1.0] + [
     (5 * _CARPET_PTS[L] - 1) / 6.0 for L in range(2, 8)
 ]
 
+# Transposition table flag constants
+_TT_EXACT = 0
+_TT_LOWER = 1  # score is a lower bound (failed high / beta cutoff)
+_TT_UPPER = 2  # score is an upper bound (failed low / alpha cutoff)
+_TT_MAX_SIZE = 1 << 18  # 262144 entries
+
 _DIRECTIONS = [Direction.UP, Direction.RIGHT, Direction.DOWN, Direction.LEFT]
 _DIRECTION_MOVEMENTS = {
     Direction.UP: (0, -1),
@@ -52,6 +58,35 @@ for _dx, _dy in _NEIGHBOR_OFFSETS:
     for _dx2, _dy2 in _NEIGHBOR_OFFSETS:
         nbr2.append((_dx + _dx2, _dy + _dy2))
     _NEIGHBOR2.append((_dx, _dy, nbr2))
+
+
+# ── transposition table helpers ───────────────────────────────────────────────
+
+
+def _board_key(board):
+    """Hashable key capturing the full mutable board state.
+
+    Excludes _blocked_mask (constant per game) and _space_mask (derived).
+    Includes everything that affects evaluation: tile masks, worker positions,
+    scores, and turns remaining.
+    """
+    p = board.player_worker
+    o = board.opponent_worker
+    return (
+        board._primed_mask,
+        board._carpet_mask,
+        p.position,
+        o.position,
+        p.points,
+        o.points,
+        p.turns_left,
+        o.turns_left,
+    )
+
+
+def _move_key(move):
+    """Compact hashable descriptor for a move (for TT best-move storage)."""
+    return (move.move_type, move.direction, getattr(move, "roll_length", 0))
 
 
 # ── move ordering ─────────────────────────────────────────────────────────────
@@ -133,7 +168,7 @@ def _order_moves_fast(board, moves):
 # ── static evaluation ─────────────────────────────────────────────────────────
 
 
-def _evaluate(board, rat_belief):
+def _evaluate(board):
     """Static evaluation from perspective of board.player_worker."""
     if board.is_game_over():
         w = board.get_winner()
@@ -257,28 +292,19 @@ def _evaluate(board, rat_belief):
         3.0 * score_diff
         + 0.12 * turn_diff
         + 0.28 * (len(player_moves) - len(opponent_moves))
-        + 0.95 * player_best_carpet - (0.95 + denial) * opponent_best_carpet
+        + 0.95 * player_best_carpet
+        - (0.95 + denial) * opponent_best_carpet
         + 0.18 * (player_carpet_sum - opponent_carpet_sum)
         + 0.35 * (player_prime_count - opponent_prime_count)
         + 0.22 * (player_openness - opponent_openness)
         + 0.14 * (player_center - opponent_center)
-        + 0.45 * player_extension - (0.45 + denial) * opponent_extension
-        + 0.30 * lf_weight * player_lf - (0.30 + denial * 0.5) * lf_weight * opponent_lf
-        + 0.20 * lf_weight * player_best_line - (0.20 + denial * 0.3) * lf_weight * opponent_best_line
+        + 0.45 * player_extension
+        - (0.45 + denial) * opponent_extension
+        + 0.30 * lf_weight * player_lf
+        - (0.30 + denial * 0.5) * lf_weight * opponent_lf
+        + 0.20 * lf_weight * player_best_line
+        - (0.20 + denial * 0.3) * lf_weight * opponent_best_line
     )
-
-    # Rat proximity — numpy vectorized
-    # if rat_belief is not None:
-    #     belief = rat_belief.belief
-    #     player_idx = player_y * 8 + player_x
-    #     opponent_idx = opponent_y * 8 + opponent_x
-    #     v += 0.10 * float(
-    #         np.dot(
-    #             belief,
-    #             _DISTANCES[opponent_idx].astype(np.float64)
-    #             - _DISTANCES[player_idx].astype(np.float64),
-    #         )
-    #     )
 
     return v
 
@@ -392,18 +418,25 @@ def _ext(board, loc, player_loc, opp_loc):
 
 
 class Expectiminimax:
-    """Negamax with PVS, width-limited alpha-beta, and iterative deepening."""
+    """Negamax with PVS, transposition table, and iterative deepening."""
 
     def __init__(self, max_depth: int = 6):
         self._best_move: Optional[Move] = None
         self.max_depth = max_depth
         self._nodes = 0
+        self._tt: dict = {}  # {board_key: (score, depth, flag, best_move_key)}
+        self._tt_hits = 0
 
     def search(self, board, rat_belief, time_budget=1.0):
         deadline = time.perf_counter() + time_budget
         self._deadline = deadline
         self._rat_belief = rat_belief
         self._nodes = 0
+        self._tt_hits = 0
+
+        # Keep TT across searches for cross-turn hits, but cap size
+        if len(self._tt) > _TT_MAX_SIZE:
+            self._tt.clear()
 
         moves = board.get_valid_moves(exclude_search=False)
         if not moves:
@@ -419,7 +452,7 @@ class Expectiminimax:
         ordered = _order_moves_full(
             board,
             move_moves,
-            lambda b: _evaluate(b, rat_belief),
+            _evaluate,
         )
 
         if not ordered:
@@ -428,8 +461,12 @@ class Expectiminimax:
         best_move = ordered[0]
         best_value = -_INF
 
+        # Cap depth at remaining game turns so we find exact endgame scores
+        turns_remaining = board.player_worker.turns_left + board.opponent_worker.turns_left
+        effective_max = min(self.max_depth, max(1, turns_remaining))
+
         # Iterative deepening with PVS
-        for depth in range(1, self.max_depth + 1):
+        for depth in range(1, effective_max + 1):
             if time.perf_counter() >= deadline:
                 break
 
@@ -476,17 +513,49 @@ class Expectiminimax:
         self._nodes += 1
 
         if depth <= 0 or board.is_game_over() or time.perf_counter() >= self._deadline:
-            return _evaluate(board, self._rat_belief)
+            return _evaluate(board)
 
+        # ── TT probe ────────────────────────────────────────────────────
+        key = _board_key(board)
+        tt_entry = self._tt.get(key)
+        tt_best_mk = None
+
+        if tt_entry is not None:
+            tt_score, tt_depth, tt_flag, tt_mk = tt_entry
+            if tt_depth >= depth:
+                if tt_flag == _TT_EXACT:
+                    self._tt_hits += 1
+                    return tt_score
+                if tt_flag == _TT_LOWER and tt_score >= beta:
+                    self._tt_hits += 1
+                    return tt_score
+                if tt_flag == _TT_UPPER and tt_score <= alpha:
+                    self._tt_hits += 1
+                    return tt_score
+            # Even if depth is insufficient for a cutoff, use the best
+            # move for ordering (the most valuable part of the TT).
+            tt_best_mk = tt_mk
+
+        # ── Generate & order moves ──────────────────────────────────────
         moves = board.get_valid_moves(enemy=False, exclude_search=True)
         if not moves:
-            return _evaluate(board, self._rat_belief)
+            return _evaluate(board)
 
         ordered = _order_moves_fast(board, moves)
-        # width = 10  # width doesn't seem to have an effect because there are only around 8 moves on average
-        # ordered = ordered[:width]
 
+        # Promote TT best move to front for better pruning
+        if tt_best_mk is not None:
+            for i in range(len(ordered)):
+                if _move_key(ordered[i]) == tt_best_mk:
+                    if i > 0:
+                        ordered.insert(0, ordered.pop(i))
+                    break
+
+        # ── Search ──────────────────────────────────────────────────────
+        orig_alpha = alpha
         best = -_INF
+        best_mk = _move_key(ordered[0]) if ordered else None
+
         for i, mv in enumerate(ordered):
             if time.perf_counter() >= self._deadline:
                 break
@@ -505,9 +574,24 @@ class Expectiminimax:
 
             if val > best:
                 best = val
+                best_mk = _move_key(mv)
             if val > alpha:
                 alpha = val
             if alpha >= beta:
                 break
 
-        return best if best > -1e17 else _evaluate(board, self._rat_belief)
+        # ── TT store ────────────────────────────────────────────────────
+        if best > -1e17:
+            if best <= orig_alpha:
+                flag = _TT_UPPER
+            elif best >= beta:
+                flag = _TT_LOWER
+            else:
+                flag = _TT_EXACT
+
+            # Depth-preferred replacement: only overwrite if new search
+            # is at least as deep as what's already stored.
+            if tt_entry is None or depth >= tt_entry[1]:
+                self._tt[key] = (best, depth, flag, best_mk)
+
+        return best if best > -1e17 else _evaluate(board)

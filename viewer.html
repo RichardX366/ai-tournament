@@ -761,7 +761,12 @@
                     step.side === 0
                       ? `<span style="color:var(--a);font-weight:700;">You</span>`
                       : `<span style="color:var(--b);font-weight:700;">Opp</span>`;
-                  return `${who} ${step.label}`;
+                  const rawPts = step.pts || 0;
+                  const displayPts = step.side === 0 ? rawPts : -rawPts;
+                  const pts = rawPts
+                    ? ` <span style="color:${displayPts > 0 ? '#6f6' : displayPts < 0 ? '#f66' : 'var(--muted)'};font-size:11px;">(${displayPts > 0 ? '+' : ''}${displayPts})</span>`
+                    : '';
+                  return `${who} ${step.label}${pts}`;
                 })
                 .join(' <span style="color:var(--muted);">→</span> ');
               pvRow.innerHTML =

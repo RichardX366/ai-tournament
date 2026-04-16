@@ -16,7 +16,7 @@ from typing import Tuple
 
 from game.board import Board
 from game.move import Move
-from .expectiminimax import Expectiminimax, _evaluate
+from .expectiminimax import Expectiminimax
 from .rat_belief import RatBelief
 
 
@@ -26,7 +26,7 @@ class PlayerAgent:
         if transition_matrix is not None:
             self.rat_belief = RatBelief(transition_matrix)
 
-        self.searcher = Expectiminimax(max_depth=10)
+        self.searcher = Expectiminimax(max_depth=14)
         self.turn_number = 0
 
     def play(
@@ -94,9 +94,11 @@ class PlayerAgent:
             best_prob = float(self.rat_belief.belief.max())
             best_ev = self.rat_belief.ev_search(best_pos)
             nodes = self.searcher._nodes
+            tt_hits = self.searcher._tt_hits
+            tt_size = len(self.searcher._tt)
             return (
                 f"Expectiminimax agent | "
                 f"Rat: {best_pos} ({best_prob:.1%}, EV={best_ev:.2f}) | "
-                f"Last search nodes: {nodes}"
+                f"Nodes: {nodes}, TT hits: {tt_hits}, TT size: {tt_size}"
             )
         return "Expectiminimax agent"

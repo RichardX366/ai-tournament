@@ -96,7 +96,7 @@
       let cx = x + dx1, cy = y + dy1;
       while (cx >= 0 && cx < 8 && cy >= 0 && cy < 8) {
         const bit = bitAt(cx, cy);
-        if ((occupied & bit) || (cx === px && cy === py) || (cx === ox && cy === oy)) break;
+        if ((occupied & bit) !== 0n || (cx === px && cy === py) || (cx === ox && cy === oy)) break;
         count1++;
         cx += dx1; cy += dy1;
       }
@@ -105,12 +105,12 @@
       cx = x + dx2; cy = y + dy2;
       while (cx >= 0 && cx < 8 && cy >= 0 && cy < 8) {
         const bit = bitAt(cx, cy);
-        if ((occupied & bit) || (cx === px && cy === py) || (cx === ox && cy === oy)) break;
+        if ((occupied & bit) !== 0n || (cx === px && cy === py) || (cx === ox && cy === oy)) break;
         count2++;
         cx += dx2; cy += dy2;
       }
 
-      const selfOk = (occupied & bitAt(x, y)) ? 0 : 1;
+      const selfOk = (occupied & bitAt(x, y)) !== 0n ? 0 : 1;
       const runway = count1 + count2 + selfOk;
 
       if (runway > bestRunway) bestRunway = runway;
@@ -127,7 +127,7 @@
     const primed = board._primed_mask;
     const carpet = board._carpet_mask;
     const blocked = board._blocked_mask;
-    if ((primed | carpet | blocked) & bit) return 0;
+    if (((primed | carpet | blocked) & bit) !== 0n) return 0;
 
     let best = 0;
     for (const dir of DIRECTIONS) {
@@ -136,7 +136,7 @@
         ny = y + dy;
       if (!(nx >= 0 && nx < 8 && ny >= 0 && ny < 8)) continue;
       const nextBit = bitAt(nx, ny);
-      if ((blocked | primed) & nextBit) continue;
+      if (((blocked | primed) & nextBit) !== 0n) continue;
       if (
         (nx === playerLoc[0] && ny === playerLoc[1]) ||
         (nx === oppLoc[0] && ny === oppLoc[1])
@@ -148,7 +148,7 @@
       let primedBehind = 0;
       let bx = x + odx,
         by = y + ody;
-      while (bx >= 0 && bx < 8 && by >= 0 && by < 8 && primed & bitAt(bx, by)) {
+      while (bx >= 0 && bx < 8 && by >= 0 && by < 8 && (primed & bitAt(bx, by)) !== 0n) {
         primedBehind++;
         bx += odx;
         by += ody;
@@ -159,7 +159,7 @@
       const space = board._space_mask;
       while (ax >= 0 && ax < 8 && ay >= 0 && ay < 8) {
         const ab = bitAt(ax, ay);
-        if (space & ab && !((primed | carpet | blocked) & ab)) {
+        if ((space & ab) !== 0n && ((primed | carpet | blocked) & ab) === 0n) {
           availableAhead++;
           ax += dx;
           ay += dy;
@@ -231,7 +231,7 @@
         nx < 8 &&
         ny >= 0 &&
         ny < 8 &&
-        !(blocked & bitAt(nx, ny))
+        (blocked & bitAt(nx, ny)) === 0n
       ) {
         playerOpen += 2;
         for (const [dx2, dy2] of nbr2) {
@@ -242,7 +242,7 @@
             nx2 < 8 &&
             ny2 >= 0 &&
             ny2 < 8 &&
-            !(blocked & bitAt(nx2, ny2))
+            (blocked & bitAt(nx2, ny2)) === 0n
           ) {
             playerOpen += 1;
           }
@@ -255,7 +255,7 @@
         nx < 8 &&
         ny >= 0 &&
         ny < 8 &&
-        !(blocked & bitAt(nx, ny))
+        (blocked & bitAt(nx, ny)) === 0n
       ) {
         oppOpen += 2;
         for (const [dx2, dy2] of nbr2) {
@@ -266,7 +266,7 @@
             nx2 < 8 &&
             ny2 >= 0 &&
             ny2 < 8 &&
-            !(blocked & bitAt(nx2, ny2))
+            (blocked & bitAt(nx2, ny2)) === 0n
           ) {
             oppOpen += 1;
           }
@@ -337,7 +337,7 @@
         const [odx, ody] = DIR_MOVEMENTS[opp];
         const bx = px + odx,
           by = py + ody;
-        if (bx >= 0 && bx < 8 && by >= 0 && by < 8 && primed & bitAt(bx, by)) {
+        if (bx >= 0 && bx < 8 && by >= 0 && by < 8 && (primed & bitAt(bx, by)) !== 0n) {
           score += 4;
         }
       }

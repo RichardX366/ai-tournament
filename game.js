@@ -222,9 +222,9 @@ class Board {
     if (!this.is_valid_cell(loc))
       throw new Error(`Invalid cell location: ${loc}`);
     const bm = this._bit(loc);
-    if (this._primed_mask & bm) return Cell.PRIMED;
-    if (this._carpet_mask & bm) return Cell.CARPET;
-    if (this._blocked_mask & bm) return Cell.BLOCKED;
+    if ((this._primed_mask & bm) !== 0n) return Cell.PRIMED;
+    if ((this._carpet_mask & bm) !== 0n) return Cell.CARPET;
+    if ((this._blocked_mask & bm) !== 0n) return Cell.BLOCKED;
     return Cell.SPACE;
   }
 
@@ -286,7 +286,7 @@ class Board {
         const next = locAfterDirection(myLoc, move.direction);
         if (this.is_cell_blocked(next)) return false;
         const bm = this._bit(myLoc);
-        if ((this._primed_mask | this._carpet_mask) & bm) return false;
+        if (((this._primed_mask | this._carpet_mask) & bm) !== 0n) return false;
         return true;
       }
       case MoveType.CARPET: {
@@ -317,7 +317,7 @@ class Board {
 
     const blockedCells = this._blocked_mask | this._primed_mask | workersMask;
     const carpetableCells = this._primed_mask & ~workersMask;
-    const canPrime = !((this._primed_mask | this._carpet_mask) & myBit);
+    const canPrime = ((this._primed_mask | this._carpet_mask) & myBit) === 0n;
 
     const directions = [
       [Direction.UP, (m) => this._shift_mask_up(m)],
@@ -328,15 +328,15 @@ class Board {
 
     for (const [dir, shift] of directions) {
       const nextCellMask = shift(myBit);
-      if (nextCellMask && !(blockedCells & nextCellMask)) {
+      if (nextCellMask !== 0n && (blockedCells & nextCellMask) === 0n) {
         validMoves.push(Move.plain(dir));
         if (canPrime) validMoves.push(Move.prime(dir));
       }
       let currentMask = myBit;
       for (let roll = 1; roll < BOARD_SIZE; roll++) {
         currentMask = shift(currentMask);
-        if (!currentMask) break;
-        if (!(carpetableCells & currentMask)) break;
+        if (currentMask === 0n) break;
+        if ((carpetableCells & currentMask) === 0n) break;
         validMoves.push(Move.carpet(dir, roll));
       }
     }

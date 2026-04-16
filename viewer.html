@@ -436,8 +436,12 @@
       </aside>
 
       <aside class="card">
-        <div class="side">
+        <div class="side" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
           <input type="file" id="fileInput" accept=".json" />
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);">
+            Max depth
+            <input type="number" id="maxDepthInput" value="6" min="1" max="20" style="width:56px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:var(--panel-2);color:var(--text);font-size:13px;font-weight:700;" />
+          </label>
         </div>
       </aside>
 
@@ -711,7 +715,7 @@
           let ranked;
           try {
             ranked = window.MINIMAX.rankMoves(board, {
-              maxDepth: 6,
+              maxDepth: parseInt(document.getElementById('maxDepthInput')?.value) || 6,
               timeBudget: 1000,
             });
           } catch (err) {

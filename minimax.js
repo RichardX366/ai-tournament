@@ -672,7 +672,15 @@
       if (val > best) {
         best = val;
         bestMk = moveKey(mv);
-        bestPV = [{ label: moveLabel(mv), side: ply % 2, pts: movePoints(mv), move: mv }, ...res.pv];
+        bestPV = [
+          {
+            label: moveLabel(mv),
+            side: ply % 2,
+            pts: movePoints(mv),
+            move: mv,
+          },
+          ...res.pv,
+        ];
       }
       if (val > alpha) alpha = val;
       if (alpha >= beta) break;
@@ -734,9 +742,34 @@
         move: mv,
         score: val - evaluate(board),
         label: moveLabel(mv),
-        pv: [{ label: moveLabel(mv), side: 0, pts: movePoints(mv), move: mv }, ...res.pv],
+        pv: [
+          { label: moveLabel(mv), side: 0, pts: movePoints(mv), move: mv },
+          ...res.pv,
+        ],
       });
     }
+
+    // Simulate Skipping Turn
+    const child = board.get_copy();
+    child.end_turn();
+    child.reverse_perspective();
+    const res = negamaxPV(child, effectiveMax - 1, -INF, INF, deadline, 1, tt);
+    const val = -res.value;
+    results.push({
+      move: Game.Move.search(),
+      score: val - evaluate(board),
+      label: 'Search (Skip Turn)',
+      pv: [
+        {
+          label: 'Search (Skip Turn)',
+          side: 0,
+          pts: 0,
+          move: Game.Move.search(),
+        },
+        ...res.pv,
+      ],
+    });
+
     results.sort((a, b) => b.score - a.score);
     return results;
   }

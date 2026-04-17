@@ -289,21 +289,21 @@ def _evaluate(board):
         denial = min(0.5, 0.025 * (20 - turns_left) * min(score_diff, 12) / 12.0)
 
     v = (
-        2.0 * score_diff
-        + 0.12 * turn_diff
-        + 0.28 * (len(player_moves) - len(opponent_moves))
-        + 0.95 * player_best_carpet
-        - (0.95 + denial) * opponent_best_carpet
-        + 0.18 * (player_carpet_sum - opponent_carpet_sum)
-        + 0.35 * (player_prime_count - opponent_prime_count)
-        + 0.22 * (player_openness - opponent_openness)
-        + 0.14 * (player_center - opponent_center)
-        + 0.35 * player_extension
-        - (0.35 + denial) * opponent_extension
-        + 0.20 * lf_weight * player_lf
-        - (0.20 + denial * 0.5) * lf_weight * opponent_lf
-        + 0.10 * lf_weight * player_best_line
-        - (0.10 + denial * 0.3) * lf_weight * opponent_best_line
+        score_diff
+        + 0.06 * turn_diff
+        + 0.14 * (len(player_moves) - len(opponent_moves))
+        + 0.47 * player_best_carpet
+        - (0.47 + denial) * opponent_best_carpet
+        + 0.1 * (player_carpet_sum - opponent_carpet_sum)
+        + 0.17 * (player_prime_count - opponent_prime_count)
+        + 0.11 * (player_openness - opponent_openness)
+        + 0.07 * (player_center - opponent_center)
+        + 0.17 * player_extension
+        - (0.17 + denial) * opponent_extension
+        + 0.10 * lf_weight * player_lf
+        - (0.10 + denial * 0.5) * lf_weight * opponent_lf
+        + 0.05 * lf_weight * player_best_line
+        - (0.05 + denial * 0.3) * lf_weight * opponent_best_line
     )
 
     return v

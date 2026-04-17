@@ -122,13 +122,9 @@ def run_simulations(
     summary = {
         "player_a": player_a_name,
         "player_b": player_b_name,
-        "simulations": simulations,
         "result_counts": result_counts,
         "avg_time_left_end": avg_time_left,
-        "scores": {
-            "avg_end": avg_scores,
-        },
-        "matches": matches,
+        "scores": avg_scores,
         "simulation_time_s": time.perf_counter() - sim_time,
     }
 
@@ -140,19 +136,76 @@ def main():
         print(f"Usage: python3 {sys.argv[0]} <player_a_name> <player_b_name>")
         sys.exit(1)
 
-    summary = run_simulations(sys.argv[1], sys.argv[2], SIMULATIONS)
-    print(f"Result counts: {summary['result_counts']}")
+    summaries = []
+
+    for i in range(SIMULATIONS // 2):
+        print(f"Running simulation {i+1}/{SIMULATIONS}...")
+        summary = run_simulations(sys.argv[1], sys.argv[2], SIMULATIONS)
+        summaries.append(summary)
+    for i in range(SIMULATIONS // 2):
+        print(f"Running simulation {i+1 + SIMULATIONS // 2}/{SIMULATIONS}...")
+        summary = run_simulations(sys.argv[2], sys.argv[1], SIMULATIONS)
+        summary = {
+            "player_a": summary["player_b"],
+            "player_b": summary["player_a"],
+            "result_counts": {
+                ResultArbiter.PLAYER_A.name: summary["result_counts"].get(
+                    ResultArbiter.PLAYER_B.name, 0
+                ),
+                ResultArbiter.PLAYER_B.name: summary["result_counts"].get(
+                    ResultArbiter.PLAYER_A.name, 0
+                ),
+                ResultArbiter.TIE.name: summary["result_counts"].get(
+                    ResultArbiter.TIE.name, 0
+                ),
+            },
+            "avg_time_left_end": {
+                "a": summary["avg_time_left_end"]["b"],
+                "b": summary["avg_time_left_end"]["a"],
+            },
+            "scores": {
+                "a": summary["scores"]["b"],
+                "b": summary["scores"]["a"],
+            },
+            "simulation_time_s": summary["simulation_time_s"],
+        }
+        summaries.append(summary)
+
+    # Calculate overall averages
+    total_results = {}
+    total_time_left = {"a": 0.0, "b": 0.0}
+    total_scores = {"a": 0.0, "b": 0.0}
+
+    for summary in summaries:
+        for result, count in summary["result_counts"].items():
+            total_results[result] = total_results.get(result, 0) + count
+        for player in ["a", "b"]:
+            total_time_left[player] += summary["avg_time_left_end"][player]
+            total_scores[player] += summary["scores"][player]
+
+    overall_avg_time_left = {
+        player: total / len(summaries) for player, total in total_time_left.items()
+    }
+    overall_avg_scores = {
+        player: total / len(summaries) for player, total in total_scores.items()
+    }
+
+    print(f"Result counts: {total_results}")
     print(
         "Avg time left at end (s):",
-        f"A={summary['avg_time_left_end']['a']:.2f}",
-        f"B={summary['avg_time_left_end']['b']:.2f}",
+        f"{sys.argv[1]}={overall_avg_time_left['a']:.2f}",
+        f"{sys.argv[2]}={overall_avg_time_left['b']:.2f}",
     )
     print(
         "Avg end score:",
-        f"A={summary['scores']['avg_end']['a']:.2f}",
-        f"B={summary['scores']['avg_end']['b']:.2f}",
+        f"{sys.argv[1]}={overall_avg_scores['a']:.2f}",
+        f"{sys.argv[2]}={overall_avg_scores['b']:.2f}",
     )
-    print("Total simulation time:", summary["simulation_time_s"])
+    print(
+        "Total simulation time:",
+        sum(summary["simulation_time_s"] for summary in summaries),
+        "s",
+    )
 
 
 if __name__ == "__main__":

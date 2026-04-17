@@ -21,18 +21,19 @@ def main():
     player_a_name = sys.argv[1]
     player_b_name = sys.argv[2]
 
-    final_board, rat_position_history, spawn_a, spawn_b, message_a, message_b = play_game(
-        play_directory,
-        play_directory,
-        player_a_name,
-        player_b_name,
-        display_game=True,
-        delay=0.0,
-        clear_screen=False,
-        record=True,
-        limit_resources=False,
+    final_board, rat_position_history, spawn_a, spawn_b, message_a, message_b = (
+        play_game(
+            play_directory,
+            play_directory,
+            player_a_name,
+            player_b_name,
+            display_game=True,
+            delay=0.0,
+            clear_screen=False,
+            record=True,
+            limit_resources=False,
+        )
     )
-
 
     sim_time = time.perf_counter() - sim_time
     turn_count = final_board.turn_count
@@ -49,7 +50,16 @@ def main():
         i += 1
 
     with open(out_path, "w") as fp:
-        fp.write(get_history_json(final_board, rat_position_history, spawn_a, spawn_b, message_a, message_b))
+        fp.write(
+            get_history_json(
+                final_board,
+                rat_position_history,
+                spawn_a,
+                spawn_b,
+                message_a,
+                message_b,
+            )
+        )
 
 
 if __name__ == "__main__":

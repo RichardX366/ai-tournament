@@ -190,6 +190,12 @@ def main():
         player: total / len(summaries) for player, total in total_scores.items()
     }
 
+    total_results[sys.argv[1]] = total_results.get(ResultArbiter.PLAYER_A.name, 0)
+    total_results[sys.argv[2]] = total_results.get(ResultArbiter.PLAYER_B.name, 0)
+
+    del total_results[ResultArbiter.PLAYER_A.name]
+    del total_results[ResultArbiter.PLAYER_B.name]
+
     print(f"Result counts: {total_results}")
     print(
         "Avg time left at end (s):",

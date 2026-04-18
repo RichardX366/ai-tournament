@@ -1,5 +1,7 @@
+import math
 import os
 import pathlib
+import random
 import sys
 import time
 import multiprocessing
@@ -10,17 +12,19 @@ from game.enums import ResultArbiter
 from gameplay import play_game
 
 
-SIMULATIONS = 8
+PAIRS = 32
 
 
 def _extract_a_b_workers(board: Board):
-    """Return (worker_a, worker_b) regardless of current board perspective."""
     if board.player_worker.is_player_a:
         return board.player_worker, board.opponent_worker
     return board.opponent_worker, board.player_worker
 
 
-def worker(player_a_name, player_b_name, play_directory, i, return_dict):
+def worker(player_a_name, player_b_name, play_directory, i, return_dict, seed=None):
+    if seed is not None:
+        random.seed(seed)
+
     final_board, rat_position_history, spawn_a, spawn_b, message_a, message_b = (
         play_game(
             play_directory,
@@ -71,147 +75,212 @@ def worker(player_a_name, player_b_name, play_directory, i, return_dict):
     }
 
 
-def run_simulations(
-    player_a_name: str, player_b_name: str, simulations: int = SIMULATIONS
-):
-    sim_time = time.perf_counter()
+def _ttest_1samp(data):
+    """One-sample t-test against mu=0. Returns (t, p, mean, ci_half_95)."""
+    n = len(data)
+    if n < 2:
+        return 0.0, 1.0, (data[0] if n else 0.0), float("inf")
 
+    mean = sum(data) / n
+    var = sum((x - mean) ** 2 for x in data) / (n - 1)
+    se = math.sqrt(var / n) if var > 0 else 0.0
+    t = mean / se if se > 0 else 0.0
+
+    try:
+        from scipy import stats as _stats
+
+        p = float(_stats.ttest_1samp(data, 0).pvalue)
+        ci_half = float(_stats.t.ppf(0.975, df=n - 1)) * se
+    except ImportError:
+        _T95 = {
+            1: 12.706,
+            2: 4.303,
+            3: 3.182,
+            4: 2.776,
+            5: 2.571,
+            6: 2.447,
+            7: 2.365,
+            8: 2.306,
+            9: 2.262,
+            10: 2.228,
+            15: 2.131,
+            20: 2.086,
+            25: 2.060,
+            30: 2.042,
+            40: 2.021,
+            60: 2.000,
+            120: 1.980,
+        }
+        best_df = min(_T95, key=lambda k: abs(k - (n - 1)))
+        ci_half = _T95[best_df] * se
+        p = 1.0 - math.erf(abs(t) / math.sqrt(2))  # normal approximation
+
+    return t, p, mean, ci_half
+
+
+def _needed_n(mean, std):
+    """Pairs needed for 80% power at this observed effect size."""
+    if std <= 0 or mean == 0:
+        return float("inf")
+    return math.ceil(((1.96 + 0.842) / (abs(mean) / std)) ** 2)
+
+
+def run_paired_test(
+    player_a_name: str, player_b_name: str, n_pairs: int = PAIRS, batch_size: int = 4
+):
+    """
+    For each of n_pairs seeds, run A-vs-B and B-vs-A on identical board conditions.
+    Paired margin for seed i:
+        (a_score_in_AxB - b_score_in_AxB + a_score_in_BxA - b_score_in_BxA) / 2
+    Runs a one-sample t-test on these margins against 0.
+    """
+    total_start = time.perf_counter()
     top_level = pathlib.Path(__file__).parent.parent.resolve()
     play_directory = os.path.join(top_level, "3600-agents")
+    seeds = [i * 10 for i in range(n_pairs)]
 
-    processes: list[multiprocessing.Process] = []
-    manager = multiprocessing.Manager()
-    return_dict = manager.dict()
+    ab_results, ba_results = {}, {}
 
-    for i in range(simulations):
-        p = multiprocessing.Process(
-            target=worker,
-            args=(player_a_name, player_b_name, play_directory, i, return_dict),
-        )
-        p.start()
-        processes.append(p)
+    pair_idx = 0
+    while pair_idx < n_pairs:
+        batch_seeds = seeds[pair_idx : pair_idx + batch_size]
 
-    for p in processes:
-        p.join()
+        manager = multiprocessing.Manager()
+        ab_dict = manager.dict()
+        ba_dict = manager.dict()
 
-    matches = [return_dict[i] for i in range(simulations)]
+        procs = []
+        for local_i, seed in enumerate(batch_seeds):
+            procs.append(
+                multiprocessing.Process(
+                    target=worker,
+                    args=(
+                        player_a_name,
+                        player_b_name,
+                        play_directory,
+                        local_i,
+                        ab_dict,
+                        seed,
+                    ),
+                )
+            )
+            procs.append(
+                multiprocessing.Process(
+                    target=worker,
+                    args=(
+                        player_b_name,
+                        player_a_name,
+                        play_directory,
+                        local_i,
+                        ba_dict,
+                        seed,
+                    ),
+                )
+            )
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join()
 
-    result_counts = {}
-    time_left_a = 0.0
-    time_left_b = 0.0
-    score_a = 0
-    score_b = 0
+        for local_i in range(len(batch_seeds)):
+            ab_results[pair_idx + local_i] = ab_dict[local_i]
+            ba_results[pair_idx + local_i] = ba_dict[local_i]
 
-    for match in matches:
-        result = match["result"]
-        result_counts[result] = result_counts.get(result, 0) + 1
-        time_left_a += match["time_left_end"]["a"]
-        time_left_b += match["time_left_end"]["b"]
-        score_a += match["scores"]["a"]
-        score_b += match["scores"]["b"]
+        end = min(pair_idx + batch_size, n_pairs)
+        print(f"  Completed pairs {pair_idx + 1}–{end} / {n_pairs}")
+        pair_idx += batch_size
 
-    avg_time_left = {
-        "a": time_left_a / simulations if simulations else 0.0,
-        "b": time_left_b / simulations if simulations else 0.0,
-    }
-    avg_scores = {
-        "a": score_a / simulations if simulations else 0.0,
-        "b": score_b / simulations if simulations else 0.0,
-    }
+    paired_margins = []
+    wins_a = wins_b = ties = 0
+    time_left_a, time_left_b = [], []
 
-    summary = {
+    for i in range(n_pairs):
+        ab, ba = ab_results[i], ba_results[i]
+        margin_ab = ab["scores"]["a"] - ab["scores"]["b"]
+        margin_ba = ba["scores"]["b"] - ba["scores"]["a"]
+        paired_margins.append((margin_ab + margin_ba) / 2.0)
+
+        # player_a_name plays as "a" in AB, as "b" in BA
+        time_left_a.append(ab["time_left_end"]["a"])
+        time_left_a.append(ba["time_left_end"]["b"])
+        time_left_b.append(ab["time_left_end"]["b"])
+        time_left_b.append(ba["time_left_end"]["a"])
+
+        for result, is_ab in [(ab["result"], True), (ba["result"], False)]:
+            if result == ResultArbiter.PLAYER_A.name:
+                wins_a += 1 if is_ab else 0
+                wins_b += 0 if is_ab else 1
+            elif result == ResultArbiter.PLAYER_B.name:
+                wins_b += 1 if is_ab else 0
+                wins_a += 0 if is_ab else 1
+            else:
+                ties += 1
+
+    contested = wins_a + wins_b
+    t, p, mean, ci = _ttest_1samp(paired_margins)
+    std = math.sqrt(sum((x - mean) ** 2 for x in paired_margins) / max(1, n_pairs - 1))
+
+    return {
         "player_a": player_a_name,
         "player_b": player_b_name,
-        "result_counts": result_counts,
-        "avg_time_left_end": avg_time_left,
-        "scores": avg_scores,
-        "simulation_time_s": time.perf_counter() - sim_time,
+        "n_pairs": n_pairs,
+        "wins_a": wins_a,
+        "wins_b": wins_b,
+        "ties": ties,
+        "win_rate_a": wins_a / contested if contested else 0.5,
+        "mean_margin": mean,
+        "ci_half_95": ci,
+        "t_stat": t,
+        "p_value": p,
+        "needed_n": _needed_n(mean, std),
+        "elapsed_s": time.perf_counter() - total_start,
+        "paired_margins": paired_margins,
+        "avg_time_left_a": sum(time_left_a) / len(time_left_a) if time_left_a else 0.0,
+        "avg_time_left_b": sum(time_left_b) / len(time_left_b) if time_left_b else 0.0,
     }
 
-    return summary
+
+def _print_report(r):
+    a, b = r["player_a"], r["player_b"]
+    print()
+    print("=" * 60)
+    print(f"  Paired AB Test: {a} vs {b}")
+    print(f"  {r['n_pairs']} pairs · {r['n_pairs'] * 2} total games")
+    print("=" * 60)
+    print(
+        f"  Win rate ({a}): {r['win_rate_a']:.1%}  ({r['wins_a']}W / {r['wins_b']}L / {r['ties']}T)"
+    )
+    lo = r["mean_margin"] - r["ci_half_95"]
+    hi = r["mean_margin"] + r["ci_half_95"]
+    print(
+        f"  Mean score margin: {r['mean_margin']:+.2f}  95% CI [{lo:+.2f}, {hi:+.2f}]"
+    )
+    print(f"  t = {r['t_stat']:.3f},  p = {r['p_value']:.4f}")
+    if r["p_value"] < 0.05:
+        winner = a if r["mean_margin"] > 0 else b
+        print(f"\n  SIGNIFICANT (p < 0.05): {winner} is better.")
+    else:
+        print(f"\n  Not significant (p = {r['p_value']:.3f}).", end="  ")
+        n = r["needed_n"]
+        if n < 500:
+            print(f"Need ~{n} pairs for 80% power.")
+        else:
+            print("Effect size too small to detect reliably.")
+    print(f"\n  Pair margins: {[f'{m:+.1f}' for m in r['paired_margins']]}")
+    print(f"  Avg time left — {a}: {r['avg_time_left_a']:.1f}s  |  {b}: {r['avg_time_left_b']:.1f}s")
+    print(f"  Time: {r['elapsed_s']:.1f}s")
+    print("=" * 60)
+    print()
 
 
 def main():
     if len(sys.argv) != 3:
-        print(f"Usage: python3 {sys.argv[0]} <player_a_name> <player_b_name>")
+        print(f"Usage: python {sys.argv[0]} <player_a> <player_b>")
         sys.exit(1)
 
-    summaries = []
-
-    for i in range(SIMULATIONS // 2):
-        print(f"Running simulation {i+1}/{SIMULATIONS}...")
-        summary = run_simulations(sys.argv[1], sys.argv[2], SIMULATIONS)
-        summaries.append(summary)
-    for i in range(SIMULATIONS // 2):
-        print(f"Running simulation {i+1 + SIMULATIONS // 2}/{SIMULATIONS}...")
-        summary = run_simulations(sys.argv[2], sys.argv[1], SIMULATIONS)
-        summary = {
-            "player_a": summary["player_b"],
-            "player_b": summary["player_a"],
-            "result_counts": {
-                ResultArbiter.PLAYER_A.name: summary["result_counts"].get(
-                    ResultArbiter.PLAYER_B.name, 0
-                ),
-                ResultArbiter.PLAYER_B.name: summary["result_counts"].get(
-                    ResultArbiter.PLAYER_A.name, 0
-                ),
-                ResultArbiter.TIE.name: summary["result_counts"].get(
-                    ResultArbiter.TIE.name, 0
-                ),
-            },
-            "avg_time_left_end": {
-                "a": summary["avg_time_left_end"]["b"],
-                "b": summary["avg_time_left_end"]["a"],
-            },
-            "scores": {
-                "a": summary["scores"]["b"],
-                "b": summary["scores"]["a"],
-            },
-            "simulation_time_s": summary["simulation_time_s"],
-        }
-        summaries.append(summary)
-
-    # Calculate overall averages
-    total_results = {}
-    total_time_left = {"a": 0.0, "b": 0.0}
-    total_scores = {"a": 0.0, "b": 0.0}
-
-    for summary in summaries:
-        for result, count in summary["result_counts"].items():
-            total_results[result] = total_results.get(result, 0) + count
-        for player in ["a", "b"]:
-            total_time_left[player] += summary["avg_time_left_end"][player]
-            total_scores[player] += summary["scores"][player]
-
-    overall_avg_time_left = {
-        player: total / len(summaries) for player, total in total_time_left.items()
-    }
-    overall_avg_scores = {
-        player: total / len(summaries) for player, total in total_scores.items()
-    }
-
-    total_results[sys.argv[1]] = total_results.get(ResultArbiter.PLAYER_A.name, 0)
-    total_results[sys.argv[2]] = total_results.get(ResultArbiter.PLAYER_B.name, 0)
-
-    del total_results[ResultArbiter.PLAYER_A.name]
-    del total_results[ResultArbiter.PLAYER_B.name]
-
-    print(f"Result counts: {total_results}")
-    print(
-        "Avg time left at end (s):",
-        f"{sys.argv[1]}={overall_avg_time_left['a']:.2f}",
-        f"{sys.argv[2]}={overall_avg_time_left['b']:.2f}",
-    )
-    print(
-        "Avg end score:",
-        f"{sys.argv[1]}={overall_avg_scores['a']:.2f}",
-        f"{sys.argv[2]}={overall_avg_scores['b']:.2f}",
-    )
-    print(
-        "Total simulation time:",
-        sum(summary["simulation_time_s"] for summary in summaries),
-        "s",
-    )
+    a, b = sys.argv[1], sys.argv[2]
+    print(f"Paired AB test: {a} vs {b}  ({PAIRS} pairs, {PAIRS * 2} games)\n")
+    _print_report(run_paired_test(a, b))
 
 
 if __name__ == "__main__":

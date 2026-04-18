@@ -21,7 +21,7 @@ from .rat_belief import RatBelief
 
 
 class PlayerAgent:
-    def __init__(self, board, transition_matrix=None, time_left: Callable = None):
+    def __init__(self, board, transition_matrix=None, time_left: Callable = None):  # type: ignore
         self.rat_belief = None
         if transition_matrix is not None:
             self.rat_belief = RatBelief(transition_matrix)

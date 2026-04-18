@@ -5,6 +5,7 @@ from .worker import Worker
 from .move import Move
 from .history import History
 
+
 class Board:
     """
     Board is the representation of the state of the match.
@@ -39,7 +40,7 @@ class Board:
         self.is_player_a_turn = True
         self.winner = None
         self.time_to_play = time_to_play
-        self.MAX_TURNS = MAX_TURNS_PER_PLAYER*2
+        self.MAX_TURNS = MAX_TURNS_PER_PLAYER * 2
 
         # Bitboard storage: Four 64-bit integers, one per cell type
         # Each bit corresponds to one cell: bit_index = y * BOARD_SIZE + x
@@ -64,15 +65,21 @@ class Board:
         self.history = History() if build_history else None
 
         # Search information ((None, False)) if they did not guess)
-        self.opponent_search = (None, False) # Last (Search Location, Search Result) for current opponent
-        self.player_search = (None, False) # Last (Search Location, Search Result) for current player
+        self.opponent_search = (
+            None,
+            False,
+        )  # Last (Search Location, Search Result) for current opponent
+        self.player_search = (
+            None,
+            False,
+        )  # Last (Search Location, Search Result) for current player
 
         # precompute valid search moves
-        self.valid_search_moves = [Move.search((x, y)) for x in range(BOARD_SIZE) for y in range(BOARD_SIZE)]
+        self.valid_search_moves = [
+            Move.search((x, y)) for x in range(BOARD_SIZE) for y in range(BOARD_SIZE)
+        ]
 
-    def is_valid_move(
-        self, move: Move, enemy: bool = False
-    ):
+    def is_valid_move(self, move: Move, enemy: bool = False):
         """
         Checks if a move is valid for the given player.
 
@@ -123,11 +130,10 @@ class Board:
                 if not self.is_valid_cell(move.search_loc):
                     return False
                 return True
-            
-        return False
-        
 
-    def get_valid_moves(self, enemy: bool = False, exclude_search = True) -> List[Tuple[Direction, MoveType]]:
+        return False
+
+    def get_valid_moves(self, enemy: bool = False, exclude_search=True) -> List[Move]:
         """
         Returns a list of all valid moves for the player or enemy.
 
@@ -162,7 +168,7 @@ class Board:
             (Direction.UP, self._shift_mask_up),
             (Direction.DOWN, self._shift_mask_down),
             (Direction.LEFT, self._shift_mask_left),
-            (Direction.RIGHT, self._shift_mask_right)
+            (Direction.RIGHT, self._shift_mask_right),
         ]
 
         for direction, shift_func in direction_shifts:
@@ -195,7 +201,7 @@ class Board:
             valid_moves.extend(self.valid_search_moves)
 
         return valid_moves
-    
+
     def forecast_move(
         self,
         move: Move,
@@ -236,13 +242,17 @@ class Board:
             if check_ok:
                 if not self.is_valid_move(move):
                     return False
-                
+
             match move.move_type:
                 case MoveType.PLAIN:
-                    self.player_worker.position = loc_after_direction(self.player_worker.get_location(), move.direction)
+                    self.player_worker.position = loc_after_direction(
+                        self.player_worker.get_location(), move.direction
+                    )
                 case MoveType.PRIME:
                     self.set_cell(self.player_worker.get_location(), Cell.PRIMED)
-                    self.player_worker.position = loc_after_direction(self.player_worker.get_location(), move.direction)
+                    self.player_worker.position = loc_after_direction(
+                        self.player_worker.get_location(), move.direction
+                    )
                     self.player_worker.increment_points(amount=1)
                 case MoveType.CARPET:
                     current_loc = self.player_worker.get_location()
@@ -256,17 +266,17 @@ class Board:
                 case MoveType.SEARCH:
                     # handled by game runner
                     pass
-            
+
             self.end_turn(timer)
-            
+
             return True
         except Exception as e:
             return False
-            
+
     def end_turn(self, timer=0):
         """
         Ends the current turn and updates game state.
-        Does NOT reverse perspective. 
+        Does NOT reverse perspective.
 
         Parameters:
             timer (float, optional): Time taken for the turn in seconds. Defaults to 0.
@@ -278,7 +288,7 @@ class Board:
         self.check_win()
 
         self.is_player_a_turn = not self.is_player_a_turn
-        
+
     def check_win(self, timeout_bounds: float = 0.5):
         """
         Checks if the game has been won and sets the winner accordingly.
@@ -296,14 +306,15 @@ class Board:
                 self.set_winner(Result.TIE, WinReason.TIMEOUT)
             else:
                 self.set_winner(Result.PLAYER, WinReason.TIMEOUT)
-        elif (self.player_worker.turns_left == 0 and self.opponent_worker.turns_left == 0) or self.turn_count >= 2 * MAX_TURNS_PER_PLAYER:
+        elif (
+            self.player_worker.turns_left == 0 and self.opponent_worker.turns_left == 0
+        ) or self.turn_count >= 2 * MAX_TURNS_PER_PLAYER:
             if self.opponent_worker.get_points() > self.player_worker.get_points():
                 self.set_winner(Result.ENEMY, WinReason.POINTS)
             elif self.opponent_worker.get_points() < self.player_worker.get_points():
                 self.set_winner(Result.PLAYER, WinReason.POINTS)
             else:
                 self.set_winner(Result.TIE, WinReason.POINTS)
-                
 
     def is_game_over(self):
         """
@@ -313,7 +324,6 @@ class Board:
             (bool): True if the game is over, False otherwise.
         """
         return self.winner is not None
-
 
     def get_copy(
         self,
@@ -397,7 +407,10 @@ class Board:
         Reverses the perspective from player to enemy or vice versa.
         This swaps all player and enemy references internally.
         """
-        self.player_worker, self.opponent_worker = self.opponent_worker, self.player_worker
+        self.player_worker, self.opponent_worker = (
+            self.opponent_worker,
+            self.player_worker,
+        )
 
     def _loc_to_bit_index(self, loc: Tuple[int, int]) -> int:
         """
@@ -447,7 +460,6 @@ class Board:
         """
         return (mask << 1) & 0xFEFEFEFEFEFEFEFE
 
-        
     def get_cell(self, loc: Tuple[int, int]) -> Cell:
         """
         Returns the type of cell at the given coordinates.
@@ -472,7 +484,7 @@ class Board:
         if self._blocked_mask & bit_mask:
             return Cell.BLOCKED
         return Cell.SPACE
-    
+
     def set_cell(self, loc: Tuple[int, int], cell_type: Cell):
         """
         Sets the type of cell at the given coordinates.
@@ -517,12 +529,9 @@ class Board:
             (bool): True if the cell is valid, False otherwise.
         """
         return (
-            loc[0] >= 0
-            and loc[1] >= 0
-            and loc[0] < BOARD_SIZE
-            and loc[1] < BOARD_SIZE
+            loc[0] >= 0 and loc[1] >= 0 and loc[0] < BOARD_SIZE and loc[1] < BOARD_SIZE
         )
-    
+
     def is_cell_blocked(self, loc: Tuple[int, int]) -> bool:
         """
         Checks if the given cell is blocked to MOVEMENT.
@@ -548,7 +557,7 @@ class Board:
         bit_mask = 1 << bit_index
 
         return bool((self._blocked_mask | self._primed_mask) & bit_mask)
-    
+
     def is_cell_carpetable(self, loc: Tuple[int, int]) -> bool:
         """
         Checks if the given cell can be carpeted.
@@ -573,6 +582,3 @@ class Board:
         bit_mask = 1 << bit_index
 
         return bool(self._primed_mask & bit_mask)
-
-
-

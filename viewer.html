@@ -324,6 +324,22 @@
               <button id="playBtn">▶ Play</button>
               <button id="nextBtn">Next ▶</button>
             </div>
+            <div class="btns" id="simEntryRow">
+              <button id="enterSimBtn">Simulate from here</button>
+            </div>
+            <div
+              id="simPanel"
+              style="display: none; flex-direction: column; gap: 10px"
+            >
+              <span class="pill" id="simStatus">Sim</span>
+              <div class="btns">
+                <button id="simAIBtn">AI Move</button>
+                <button id="simAutoBtn">▶ Auto AI</button>
+                <button id="simStopBtn" style="display: none">⏸ Stop</button>
+                <button id="simUndoBtn">↩ Undo</button>
+                <button id="simExitBtn">✕ Exit Sim</button>
+              </div>
+            </div>
           </div>
 
           <div class="stats">
@@ -384,11 +400,6 @@
               >
             </div>
           </div>
-
-          <div>
-            <h3 style="margin-bottom: 10px">Outcome</h3>
-            <div class="log" id="outcome"></div>
-          </div>
         </div>
       </aside>
 
@@ -436,39 +447,227 @@
       </aside>
 
       <aside class="card">
-        <div
-          class="side"
-          style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap"
-        >
-          <input type="file" id="fileInput" accept=".json" />
-          <label
+        <div class="side">
+          <div
             style="
               display: flex;
               align-items: center;
-              gap: 8px;
-              font-size: 13px;
+              gap: 16px;
+              flex-wrap: wrap;
+            "
+          >
+            <input type="file" id="fileInput" accept=".json" />
+            <label
+              style="
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 13px;
+                color: var(--muted);
+              "
+            >
+              Max depth
+              <input
+                type="number"
+                id="maxDepthInput"
+                value="6"
+                min="1"
+                max="20"
+                style="
+                  width: 56px;
+                  padding: 6px 8px;
+                  border-radius: 8px;
+                  border: 1px solid rgba(255, 255, 255, 0.12);
+                  background: var(--panel-2);
+                  color: var(--text);
+                  font-size: 13px;
+                  font-weight: 700;
+                "
+              />
+            </label>
+            <button id="evalBtn">Eval</button>
+          </div>
+          <div
+            style="
+              display: grid;
+              gap: 6px;
+              font-size: 12px;
               color: var(--muted);
             "
           >
-            Max depth
-            <input
-              type="number"
-              id="maxDepthInput"
-              value="6"
-              min="1"
-              max="20"
+            <div
               style="
-                width: 56px;
-                padding: 6px 8px;
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                background: var(--panel-2);
-                color: var(--text);
-                font-size: 13px;
-                font-weight: 700;
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                opacity: 0.6;
+                margin-bottom: 2px;
               "
-            />
-          </label>
+            >
+              Eval weights
+            </div>
+            <div
+              style="
+                display: grid;
+                grid-template-columns: 110px 1fr 36px;
+                align-items: center;
+                gap: 8px;
+              "
+            >
+              <span>Best carpet</span>
+              <input
+                type="range"
+                id="w_bestCarpet"
+                min="0"
+                max="0.5"
+                step="0.01"
+                value="0.5"
+              />
+              <span
+                id="w_bestCarpet_v"
+                style="text-align: right; font-family: monospace"
+                >0.50</span
+              >
+            </div>
+            <div
+              style="
+                display: grid;
+                grid-template-columns: 110px 1fr 36px;
+                align-items: center;
+                gap: 8px;
+              "
+            >
+              <span>LF total</span>
+              <input
+                type="range"
+                id="w_lfTotal"
+                min="0"
+                max="0.5"
+                step="0.01"
+                value="0.1"
+              />
+              <span
+                id="w_lfTotal_v"
+                style="text-align: right; font-family: monospace"
+                >0.10</span
+              >
+            </div>
+            <div
+              style="
+                display: grid;
+                grid-template-columns: 110px 1fr 36px;
+                align-items: center;
+                gap: 8px;
+              "
+            >
+              <span>LF best runway</span>
+              <input
+                type="range"
+                id="w_lfBest"
+                min="0"
+                max="0.5"
+                step="0.01"
+                value="0.3"
+              />
+              <span
+                id="w_lfBest_v"
+                style="text-align: right; font-family: monospace"
+                >0.30</span
+              >
+            </div>
+            <div
+              style="
+                display: grid;
+                grid-template-columns: 110px 1fr 36px;
+                align-items: center;
+                gap: 8px;
+              "
+            >
+              <span>Center</span>
+              <input
+                type="range"
+                id="w_center"
+                min="0"
+                max="0.5"
+                step="0.01"
+                value="0.1"
+              />
+              <span
+                id="w_center_v"
+                style="text-align: right; font-family: monospace"
+                >0.10</span
+              >
+            </div>
+            <div
+              style="
+                display: grid;
+                grid-template-columns: 110px 1fr 36px;
+                align-items: center;
+                gap: 8px;
+              "
+            >
+              <span>Prime count</span>
+              <input
+                type="range"
+                id="w_prime"
+                min="0"
+                max="0.5"
+                step="0.01"
+                value="0.1"
+              />
+              <span
+                id="w_prime_v"
+                style="text-align: right; font-family: monospace"
+                >0.10</span
+              >
+            </div>
+            <div
+              style="
+                display: grid;
+                grid-template-columns: 110px 1fr 36px;
+                align-items: center;
+                gap: 8px;
+              "
+            >
+              <span>Openness</span>
+              <input
+                type="range"
+                id="w_openness"
+                min="0"
+                max="0.5"
+                step="0.01"
+                value="0.1"
+              />
+              <span
+                id="w_openness_v"
+                style="text-align: right; font-family: monospace"
+                >0.10</span
+              >
+            </div>
+            <div
+              style="
+                display: grid;
+                grid-template-columns: 110px 1fr 36px;
+                align-items: center;
+                gap: 8px;
+              "
+            >
+              <span>Extension</span>
+              <input
+                type="range"
+                id="w_ext"
+                min="0"
+                max="0.5"
+                step="0.01"
+                value="0.2"
+              />
+              <span
+                id="w_ext_v"
+                style="text-align: right; font-family: monospace"
+                >0.20</span
+              >
+            </div>
+          </div>
         </div>
       </aside>
 
@@ -580,12 +779,19 @@
 
         let timer = null;
 
+        // Simulation state
+        let simMode = false;
+        let simBoard = null;
+        let simAToMove = true;
+        let simHistory = [];
+        let simAutoTimer = null;
+
         function fmtPos(pos) {
           return pos ? `(${pos[0]}, ${pos[1]})` : '—';
         }
 
         function fmtTime(t) {
-          return typeof t === 'number' ? t.toFixed(2) + 's' : '—';
+          return typeof t === 'number' ? t.toFixed(0) + 's' : '—';
         }
 
         function getTileType(x, y, turn) {
@@ -656,15 +862,6 @@
             : 'No';
           document.getElementById('leftBehind').textContent =
             data.left_behind[turn] || '—';
-          document.getElementById('outcome').textContent = JSON.stringify(
-            {
-              result: data.result,
-              reason: data.reason,
-              turn_count: data.turn_count,
-            },
-            null,
-            2,
-          );
 
           renderMinimaxPanel(turn);
         }
@@ -809,6 +1006,115 @@
           }
         }
 
+        function enterSim() {
+          const rec = reconstructBoard(Number(slider.value));
+          if (!rec) return;
+          simBoard = rec.board;
+          simAToMove = rec.aToMove;
+          simHistory = [];
+          simMode = true;
+          document.getElementById('simEntryRow').style.display = 'none';
+          document.getElementById('simPanel').style.display = 'flex';
+          renderSim();
+        }
+
+        function exitSim() {
+          stopSimAuto();
+          simMode = false;
+          simBoard = null;
+          simHistory = [];
+          document.getElementById('simEntryRow').style.display = '';
+          document.getElementById('simPanel').style.display = 'none';
+          render(Number(slider.value));
+        }
+
+        function applySimMove(move) {
+          simHistory.push({ board: simBoard.get_copy(), aToMove: simAToMove });
+          let child = simBoard.forecast_move(move, true);
+          if (!child) {
+            child = simBoard.get_copy();
+          }
+          child.reverse_perspective();
+          simBoard = child;
+          simAToMove = !simAToMove;
+          renderSim();
+          return true;
+        }
+
+        function undoSimMove() {
+          if (!simHistory.length) return;
+          const prev = simHistory.pop();
+          simBoard = prev.board;
+          simAToMove = prev.aToMove;
+          renderSim();
+        }
+
+        function renderSim() {
+          const who = simAToMove ? 'A' : 'B';
+          document.getElementById('simStatus').textContent =
+            `Sim — ${who} to move (turn ${simBoard.turn_count})`;
+          document.getElementById('turnBadge').textContent =
+            `Sim Turn ${simBoard.turn_count}`;
+          renderBoardPreview(simBoard, simAToMove);
+          const p = simBoard.player_worker;
+          const o = simBoard.opponent_worker;
+          const aW = simAToMove ? p : o;
+          const bW = simAToMove ? o : p;
+          document.getElementById('aPos').textContent = fmtPos(
+            aW.get_location(),
+          );
+          document.getElementById('bPos').textContent = fmtPos(
+            bW.get_location(),
+          );
+          document.getElementById('aStats').textContent =
+            `${aW.points} / ${aW.turns_left} / ${fmtTime(aW.time_left)}`;
+          document.getElementById('bStats').textContent =
+            `${bW.points} / ${bW.turns_left} / ${fmtTime(bW.time_left)}`;
+          if (simBoard.is_game_over()) {
+            stopSimAuto();
+            document.getElementById('simStatus').textContent =
+              `Sim — Game over (turn ${simBoard.turn_count})`;
+          }
+          renderMinimaxPanel(Number(slider.value));
+        }
+
+        function simAIMove() {
+          if (!simMode || !window.MINIMAX || simBoard.is_game_over()) return;
+          const ranked = window.MINIMAX.rankMoves(simBoard, {
+            maxDepth:
+              parseInt(document.getElementById('maxDepthInput')?.value) || 6,
+            timeBudget: 5000,
+          });
+          if (!ranked.length) return;
+          applySimMove(ranked[0].move);
+        }
+
+        function startSimAuto() {
+          if (simAutoTimer) return;
+          document.getElementById('simAutoBtn').style.display = 'none';
+          document.getElementById('simStopBtn').style.display = '';
+          function step() {
+            if (!simMode || simBoard.is_game_over()) {
+              stopSimAuto();
+              return;
+            }
+            simAIMove();
+            simAutoTimer = setTimeout(step, 600);
+          }
+          simAutoTimer = setTimeout(step, 0);
+        }
+
+        function stopSimAuto() {
+          if (simAutoTimer) {
+            clearTimeout(simAutoTimer);
+            simAutoTimer = null;
+          }
+          const autoBtn = document.getElementById('simAutoBtn');
+          const stopBtn = document.getElementById('simStopBtn');
+          if (autoBtn) autoBtn.style.display = '';
+          if (stopBtn) stopBtn.style.display = 'none';
+        }
+
         function renderMinimaxPanel(turn) {
           const body = document.getElementById('moveScoreBody');
           const badge = document.getElementById('minimaxPlayerBadge');
@@ -818,13 +1124,21 @@
             badge.textContent = 'minimax not loaded';
             return;
           }
-          const rec = reconstructBoard(turn);
-          if (!rec) {
-            badge.textContent = '—';
-            return;
+          let board, aToMove;
+          if (simMode && simBoard) {
+            board = simBoard;
+            aToMove = simAToMove;
+          } else {
+            const rec = reconstructBoard(turn);
+            if (!rec) {
+              badge.textContent = '—';
+              return;
+            }
+            board = rec.board;
+            aToMove = rec.aToMove;
           }
-          const { board, aToMove } = rec;
-          badge.textContent = aToMove ? 'A to move' : 'B to move';
+          badge.textContent =
+            (aToMove ? 'A' : 'B') + ' to move' + (simMode ? ' (SIM)' : '');
 
           let ranked;
           try {
@@ -855,24 +1169,31 @@
             const frac = max === min ? 1 : (r.score - min) / (max - min);
             const hue = Math.round(frac * 120); // red→green
 
-            // Main row (clickable to expand PV)
+            // Main row
             const row = document.createElement('tr');
             row.style.borderTop = '1px solid rgba(255,255,255,0.06)';
-            row.style.cursor = r.pv && r.pv.length > 1 ? 'pointer' : 'default';
-            const arrow = r.pv && r.pv.length > 1 ? '&#9654; ' : '';
+            const hasPV = !simMode && r.pv && r.pv.length > 1;
+            row.style.cursor = simMode || hasPV ? 'pointer' : 'default';
+            if (simMode) row.title = 'Click to play this move';
+            const arrow = hasPV ? '&#9654; ' : '';
             row.innerHTML =
               `<td style="padding:6px 8px;color:var(--muted);">${i + 1}</td>` +
               `<td style="padding:6px 8px;">${arrow}${r.label}</td>` +
               `<td style="padding:6px 8px;text-align:right;color:hsl(${hue},70%,65%);font-weight:700;">${r.score.toFixed(3)}</td>`;
             body.appendChild(row);
 
-            // PV detail row (hidden until clicked)
-            if (r.pv && r.pv.length > 1) {
+            if (simMode) {
+              row.addEventListener('click', () => applySimMove(r.move));
+            }
+
+            // PV detail row (hidden until clicked, only in non-sim mode)
+            if (hasPV) {
               const pvRow = document.createElement('tr');
               pvRow.style.display = 'none';
               const pvCell = document.createElement('td');
               pvCell.colSpan = 2;
-              pvCell.style.cssText = 'padding:4px 8px 10px 20px;font-size:12px;color:var(--muted);line-height:1.6;';
+              pvCell.style.cssText =
+                'padding:4px 8px 10px 20px;font-size:12px;color:var(--muted);line-height:1.6;';
 
               const pvLabel = document.createElement('span');
               pvLabel.style.cssText = 'color:var(--muted);opacity:0.6;';
@@ -891,10 +1212,12 @@
                 }
 
                 const span = document.createElement('span');
-                span.style.cssText = 'cursor:pointer;padding:2px 4px;border-radius:4px;transition:background 0.15s;';
-                const who = step.side === 0
-                  ? `<span style="color:var(--a);font-weight:700;">You</span>`
-                  : `<span style="color:var(--b);font-weight:700;">Opp</span>`;
+                span.style.cssText =
+                  'cursor:pointer;padding:2px 4px;border-radius:4px;transition:background 0.15s;';
+                const who =
+                  step.side === 0
+                    ? `<span style="color:var(--a);font-weight:700;">You</span>`
+                    : `<span style="color:var(--b);font-weight:700;">Opp</span>`;
                 const rawPts = step.pts || 0;
                 const displayPts = step.side === 0 ? rawPts : -rawPts;
                 const pts = rawPts
@@ -912,20 +1235,44 @@
                   for (let k = 0; k <= j; k++) {
                     const mv = r.pv[k].move;
                     if (!mv) break;
-                    const child = b.forecast_move(mv, true);
-                    if (!child) break;
+                    let child = b.forecast_move(mv, true);
+                    if (!child) {
+                      child = b.get_copy();
+                    }
                     child.reverse_perspective();
                     b = child;
                     flipped = !flipped;
                   }
                   // If flipped odd times, player/opponent are swapped relative to aToMove
-                  renderBoardPreview(b, flipped ? !currentAToMove : currentAToMove);
+                  renderBoardPreview(
+                    b,
+                    flipped ? !currentAToMove : currentAToMove,
+                  );
+                });
+
+                span.addEventListener('click', () => {
+                  const rec2 = reconstructBoard(currentTurn);
+                  if (!rec2) return;
+                  let b = rec2.board;
+                  let flipped = false; // tracks if perspective is reversed relative to original
+                  for (let k = 0; k <= j; k++) {
+                    const mv = r.pv[k].move;
+                    if (!mv) break;
+                    let child = b.forecast_move(mv, true);
+                    if (!child) {
+                      child = b.get_copy();
+                    }
+                    child.reverse_perspective();
+                    b = child;
+                    flipped = !flipped;
+                  }
+                  console.log('evaluate', window.MINIMAX.evaluate(b, true));
                 });
 
                 span.addEventListener('mouseleave', () => {
                   span.style.background = '';
-                  // Re-render just the board, not the minimax panel
-                  renderBoardOnly(currentTurn);
+                  if (simMode) renderBoardPreview(simBoard, simAToMove);
+                  else renderBoardOnly(currentTurn);
                 });
 
                 pvCell.appendChild(span);
@@ -964,6 +1311,62 @@
           .addEventListener('change', () =>
             renderMinimaxPanel(Number(slider.value)),
           );
+
+        document.getElementById('evalBtn').addEventListener('click', () => {
+          if (!window.MINIMAX) return;
+          let board, aToMove;
+          if (simMode && simBoard) {
+            board = simBoard;
+            aToMove = simAToMove;
+          } else {
+            const rec = reconstructBoard(Number(slider.value));
+            if (!rec) return;
+            board = rec.board;
+            aToMove = rec.aToMove;
+          }
+          const score = window.MINIMAX.evaluate(board);
+          console.log(
+            `eval (${aToMove ? 'A' : 'B'} to move, turn ${board.turn_count}):`,
+            score,
+          );
+        });
+
+        const wDefs = [
+          ['w_bestCarpet', 'bestCarpet'],
+          ['w_lfTotal', 'lfTotal'],
+          ['w_lfBest', 'lfBest'],
+          ['w_center', 'center'],
+          ['w_prime', 'prime'],
+          ['w_openness', 'openness'],
+          ['w_ext', 'ext'],
+        ];
+        for (const [id, key] of wDefs) {
+          document.getElementById(id).addEventListener('input', function () {
+            const v = parseFloat(this.value);
+            document.getElementById(id + '_v').textContent = v.toFixed(2);
+            if (window.MINIMAX?.weights) window.MINIMAX.weights[key] = v;
+            renderMinimaxPanel(Number(slider.value));
+          });
+        }
+
+        document
+          .getElementById('enterSimBtn')
+          .addEventListener('click', enterSim);
+        document
+          .getElementById('simExitBtn')
+          .addEventListener('click', exitSim);
+        document
+          .getElementById('simAIBtn')
+          .addEventListener('click', simAIMove);
+        document
+          .getElementById('simAutoBtn')
+          .addEventListener('click', startSimAuto);
+        document
+          .getElementById('simStopBtn')
+          .addEventListener('click', stopSimAuto);
+        document
+          .getElementById('simUndoBtn')
+          .addEventListener('click', undoSimMove);
 
         playBtn.addEventListener('click', () => {
           if (timer) {

@@ -86,6 +86,17 @@
     nbr2: NEIGHBOR_OFFSETS.map(([dx2, dy2]) => [dx + dx2, dy + dy2]),
   }));
 
+  // --- Eval weights (mutable — updated by UI sliders) --------------------
+  const weights = {
+    bestCarpet: 0.5,
+    lfTotal: 0.1,
+    lfBest: 0.3,
+    center: 0.1,
+    prime: 0.1,
+    openness: 0.1,
+    ext: 0.2,
+  };
+
   function bitAt(x, y) {
     return 1n << BigInt(y * 8 + x);
   }
@@ -126,6 +137,8 @@
           (cx === ox && cy === oy)
         )
           break;
+        // opponent can reach this tile before us — line is contested from here
+        if (Math.abs(cx - ox) + Math.abs(cy - oy) < count1 + 1) break;
         count1++;
         cx += dx1;
         cy += dy1;
@@ -142,6 +155,8 @@
           (cx === ox && cy === oy)
         )
           break;
+        // opponent can reach this tile before us — line is contested from here
+        if (Math.abs(cx - ox) + Math.abs(cy - oy) < count2 + 1) break;
         count2++;
         cx += dx2;
         cy += dy2;
@@ -221,8 +236,105 @@
     return best;
   }
 
+  // --- Primed run ownership ------------------------------------------------
+  // Each horizontal/vertical run of primed tiles (length >= 2) is treated as
+  // one indivisible unit.  A run is claimed by whichever agent has the smaller
+  // Manhattan distance to either of its (non-blocked) endpoints — player wins
+  // ties.  Runs are processed highest-value first; each side's first claim is
+  // their best.  No two claims from different sides can come from the same run.
+  // Returns [playerBest, opponentBest].
+  function bestCarpetForSides(board, playerLoc, oppLoc) {
+    const primed = board._primed_mask;
+    const blocked = board._blocked_mask;
+    if (primed === 0n) return [0, 0];
+
+    const runs = []; // { ep1: [x,y]|null, ep2: [x,y]|null, val }
+
+    function addRun(x1, y1, x2, y2, val) {
+      const inB1 = x1 >= 0 && x1 < 8 && y1 >= 0 && y1 < 8;
+      const inB2 = x2 >= 0 && x2 < 8 && y2 >= 0 && y2 < 8;
+      const b1 = !inB1 || (blocked & bitAt(x1, y1)) !== 0n;
+      const b2 = !inB2 || (blocked & bitAt(x2, y2)) !== 0n;
+      if (!b1 || !b2)
+        runs.push({
+          ep1: b1 ? null : [x1, y1],
+          ep2: b2 ? null : [x2, y2],
+          val,
+        });
+    }
+
+    // Horizontal runs — endpoints are the squares just outside the run
+    for (let y = 0; y < 8; y++) {
+      let rs = 0,
+        rl = 0;
+      for (let x = 0; x <= 8; x++) {
+        const has = x < 8 && (primed & bitAt(x, y)) !== 0n;
+        if (has) {
+          if (rl === 0) rs = x;
+          rl++;
+        } else if (rl >= 2) {
+          addRun(rs - 1, y, x, y, CARPET_PTS[Math.min(rl, 7)]);
+          rl = 0;
+        } else {
+          rl = 0;
+        }
+      }
+    }
+
+    // Vertical runs — endpoints are the squares just outside the run
+    for (let x = 0; x < 8; x++) {
+      let rs = 0,
+        rl = 0;
+      for (let y = 0; y <= 8; y++) {
+        const has = y < 8 && (primed & bitAt(x, y)) !== 0n;
+        if (has) {
+          if (rl === 0) rs = y;
+          rl++;
+        } else if (rl >= 2) {
+          addRun(x, rs - 1, x, y, CARPET_PTS[Math.min(rl, 7)]);
+          rl = 0;
+        } else {
+          rl = 0;
+        }
+      }
+    }
+
+    if (!runs.length) return [0, 0];
+
+    runs.sort((a, b) => b.val - a.val);
+
+    const [px, py] = playerLoc;
+    const [ox, oy] = oppLoc;
+
+    function distToRun(wx, wy, { ep1, ep2 }) {
+      let d = Infinity;
+      if (ep1) d = Math.min(d, Math.abs(ep1[0] - wx) + Math.abs(ep1[1] - wy));
+      if (ep2) d = Math.min(d, Math.abs(ep2[0] - wx) + Math.abs(ep2[1] - wy));
+      return d;
+    }
+
+    // Runs are sorted by raw value for claiming priority.
+    // The returned score is distance-weighted: val * exp(-dist / 4),
+    // so carpets the player is right next to score near their full value
+    // while distant carpets contribute much less.
+    let playerBest = 0,
+      opponentBest = 0;
+    for (const run of runs) {
+      const dp = distToRun(px, py, run);
+      const dop = distToRun(ox, oy, run);
+      if (dp <= dop) {
+        if (playerBest === 0) playerBest = run.val * Math.exp(-dp / 4);
+      } else {
+        if (opponentBest === 0) opponentBest = run.val * Math.exp(-dop / 4);
+      }
+      if (playerBest > 0 && opponentBest > 0) break;
+    }
+
+    return [playerBest, opponentBest];
+  }
+
   // --- Static evaluation -------------------------------------------------
-  function evaluate(board) {
+  function evaluate(board, logComponents = false) {
     if (board.is_game_over()) {
       const w = board.get_winner();
       if (w === Result.PLAYER) return 999;
@@ -235,32 +347,21 @@
     const [ox, oy] = opponent.get_location();
 
     const scoreDiff = player.get_points() - opponent.get_points();
-    const turnDiff = player.turns_left - opponent.turns_left;
+
+    const tc = board.turn_count;
+    if (tc > 77) return scoreDiff;
 
     const playerMoves = board.get_valid_moves(false, true);
     const opponentMoves = board.get_valid_moves(true, true);
 
-    function tact(moves) {
-      let bestCarpet = 0,
-        carpetSum = 0,
-        primeCount = 0;
-      for (const mv of moves) {
-        if (mv.move_type === MoveType.CARPET) {
-          const rl = mv.roll_length;
-          const pts =
-            rl >= 0 && rl < CARPET_EVALUATIONS.length
-              ? CARPET_EVALUATIONS[rl]
-              : 0;
-          if (pts > bestCarpet) bestCarpet = pts;
-          if (pts > 0) carpetSum += pts;
-        } else if (mv.move_type === MoveType.PRIME) {
-          primeCount++;
-        }
-      }
-      return [bestCarpet, carpetSum, primeCount];
+    function countPrimes(moves) {
+      let n = 0;
+      for (const mv of moves) if (mv.move_type === MoveType.PRIME) n++;
+      return n;
     }
-    const [pBest, pSum, pPrime] = tact(playerMoves);
-    const [oBest, oSum, oPrime] = tact(opponentMoves);
+    const pPrime = countPrimes(playerMoves);
+    const oPrime = countPrimes(opponentMoves);
+    const [pBest, oBest] = bestCarpetForSides(board, [px, py], [ox, oy]);
 
     // Openness
     const blocked = board._blocked_mask;
@@ -317,60 +418,57 @@
       }
     }
 
-    const playerCenter = 7 - (Math.abs(px - 3.5) + Math.abs(py - 3.5));
-    const oppCenter = 7 - (Math.abs(ox - 3.5) + Math.abs(oy - 3.5));
-    const playerExt = ext(board, [px, py], [px, py], [ox, oy]);
-    const oppExt = ext(board, [ox, oy], [px, py], [ox, oy]);
+    // Mid-game multiplier: ramp in 10→20, full 20→55, ramp out 55→65
+    let midgameWeight;
+    if (tc < 10) midgameWeight = 0;
+    else if (tc < 20) midgameWeight = (tc - 10) / 10;
+    else if (tc < 55) midgameWeight = 1;
+    else if (tc < 65) midgameWeight = (65 - tc) / 10;
+    else midgameWeight = 0;
 
-    // Line freedom: mid-game only (ramp in 10→20, full 20→55, ramp out 55→65)
-    const tc = board.turn_count;
-    let lfWeight;
-    if (tc < 10) lfWeight = 0;
-    else if (tc < 20) lfWeight = (tc - 10) / 10;
-    else if (tc < 55) lfWeight = 1;
-    else if (tc < 65) lfWeight = (65 - tc) / 10;
-    else lfWeight = 0;
-
-    let pLFtotal = 0,
-      oLFtotal = 0,
-      pLFbest = 0,
-      oLFbest = 0;
-    if (lfWeight > 0) {
+    let midgameFactors = 0;
+    if (midgameWeight > 0) {
+      const playerCenter = 7 - (Math.abs(px - 3.5) + Math.abs(py - 3.5));
+      const oppCenter = 7 - (Math.abs(ox - 3.5) + Math.abs(oy - 3.5));
+      const playerExt = ext(board, [px, py], [px, py], [ox, oy]);
+      const oppExt = ext(board, [ox, oy], [px, py], [ox, oy]);
       const pLF = lineFreedom(board, [px, py], [px, py], [ox, oy]);
       const oLF = lineFreedom(board, [ox, oy], [px, py], [ox, oy]);
-      pLFtotal = pLF.total;
-      oLFtotal = oLF.total;
-      pLFbest = pLF.bestRunway;
-      oLFbest = oLF.bestRunway;
+      midgameFactors =
+        midgameWeight *
+        (weights.lfTotal * (pLF.total - oLF.total) +
+          weights.lfBest * (pLF.bestRunway - oLF.bestRunway) +
+          weights.center * (playerCenter - oppCenter) +
+          weights.prime * (pPrime - oPrime) +
+          weights.openness * (playerOpen - oppOpen) +
+          weights.ext * (playerExt - oppExt));
+      if (logComponents) {
+        console.log('Midgame eval components:');
+        console.log('  Line freedom total:', pLF.total, 'vs', oLF.total);
+        console.log(
+          '  Line freedom best runway:',
+          pLF.bestRunway,
+          'vs',
+          oLF.bestRunway,
+        );
+        console.log('  Center proximity:', playerCenter, 'vs', oppCenter);
+        console.log('  Prime count:', pPrime, 'vs', oPrime);
+        console.log('  Openness:', playerOpen, 'vs', oppOpen);
+        console.log(
+          '  Extension value:',
+          playerExt.toFixed(2),
+          'vs',
+          oppExt.toFixed(2),
+        );
+      }
     }
 
-    // Denial: when ahead in late game, penalize opponent's positional terms more
-    const turnsLeft = Math.max(1, player.turns_left);
-    let denial = 0;
-    if (scoreDiff > 0 && turnsLeft <= 20) {
-      denial = Math.min(
-        0.5,
-        (0.025 * (20 - turnsLeft) * Math.min(scoreDiff, 12)) / 12,
-      );
+    if (logComponents) {
+      console.log('Score diff:', scoreDiff);
+      console.log('Best carpet:', pBest.toFixed(2), 'vs', oBest.toFixed(2));
     }
 
-    return (
-      3.0 * scoreDiff +
-      0.12 * turnDiff +
-      0.28 * (playerMoves.length - opponentMoves.length) +
-      0.95 * pBest -
-      (0.95 + denial) * oBest +
-      0.18 * (pSum - oSum) +
-      0.35 * (pPrime - oPrime) +
-      0.22 * (playerOpen - oppOpen) +
-      0.14 * (playerCenter - oppCenter) +
-      0.45 * playerExt -
-      (0.45 + denial) * oppExt +
-      0.3 * lfWeight * pLFtotal -
-      (0.3 + denial * 0.5) * lfWeight * oLFtotal +
-      0.2 * lfWeight * pLFbest -
-      (0.2 + denial * 0.3) * lfWeight * oLFbest
-    );
+    return scoreDiff + weights.bestCarpet * (pBest - oBest) + midgameFactors;
   }
 
   // --- Move ordering -----------------------------------------------------
@@ -444,77 +542,6 @@
       return typeof performance !== 'undefined'
         ? performance.now()
         : Date.now();
-    }
-
-    search(board, timeBudgetMs = 500) {
-      this._deadline = this._now() + timeBudgetMs;
-      this._nodes = 0;
-      this._ttHits = 0;
-
-      // Cap TT size
-      if (this._tt.size > TT_MAX_SIZE) this._tt.clear();
-
-      const moves = board.get_valid_moves(false, true);
-      if (!moves.length) return { move: Move.plain(Direction.UP), value: 0 };
-
-      let ordered = orderMovesFull(board, moves, (b) => evaluate(b));
-      if (!ordered.length) return { move: moves[0], value: 0 };
-
-      let bestMove = ordered[0];
-      let bestValue = -INF;
-
-      // Cap depth at remaining game turns
-      const turnsRemaining =
-        board.player_worker.turns_left + board.opponent_worker.turns_left;
-      const effectiveMax = Math.min(this.maxDepth, Math.max(1, turnsRemaining));
-
-      for (let depth = 1; depth <= effectiveMax; depth++) {
-        if (this._now() >= this._deadline) break;
-        let alpha = -INF;
-        const beta = INF;
-        let dBest = ordered[0];
-        let dVal = -INF;
-        let done = true;
-
-        for (let i = 0; i < ordered.length; i++) {
-          if (this._now() >= this._deadline) {
-            done = false;
-            break;
-          }
-          const mv = ordered[i];
-          const child = board.forecast_move(mv, true);
-          if (!child) continue;
-          child.reverse_perspective();
-
-          let val;
-          if (i === 0) {
-            val = -this._negamax(child, depth - 1, -beta, -alpha);
-          } else {
-            val = -this._negamax(child, depth - 1, -alpha - 0.01, -alpha);
-            if (val > alpha && val < beta) {
-              val = -this._negamax(child, depth - 1, -beta, -alpha);
-            }
-          }
-          if (val > dVal) {
-            dVal = val;
-            dBest = mv;
-          }
-          if (val > alpha) alpha = val;
-        }
-
-        if (dVal > -1e17) {
-          bestValue = dVal;
-          bestMove = dBest;
-          const i = ordered.indexOf(dBest);
-          if (i > 0) {
-            ordered.splice(i, 1);
-            ordered.unshift(dBest);
-          }
-        }
-        if (!done) break;
-      }
-
-      return { move: bestMove, value: bestValue };
     }
 
     _negamax(board, depth, alpha, beta) {
@@ -714,7 +741,7 @@
     // Cap depth at remaining game turns
     const turnsRemaining =
       board.player_worker.turns_left + board.opponent_worker.turns_left;
-    const effectiveMax = Math.min(maxDepth, Math.max(1, turnsRemaining));
+    const effectiveMax = Math.min(maxDepth, Math.max(1, turnsRemaining - 1));
 
     const now =
       typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -790,7 +817,7 @@
     }
   }
 
-  const API = { evaluate, Expectiminimax, rankMoves, moveLabel };
+  const API = { evaluate, Expectiminimax, rankMoves, moveLabel, weights };
   if (typeof window !== 'undefined') window.MINIMAX = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })();

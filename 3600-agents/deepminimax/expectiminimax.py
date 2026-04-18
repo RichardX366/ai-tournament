@@ -1,3 +1,4 @@
+import math
 import time
 from typing import Optional, Tuple, List
 
@@ -168,7 +169,89 @@ def _order_moves_fast(board, moves):
 # ── static evaluation ─────────────────────────────────────────────────────────
 
 
-def _evaluate(board):
+def _best_carpet_for_sides(board, player_loc, opp_loc):
+    """Scan primed runs of length >= 2, assign each exclusively to the closer
+    player (Manhattan distance to outside endpoint; player wins ties).
+    Returns (player_best, opp_best) with exponential distance decay."""
+    primed = board._primed_mask
+    blocked = board._blocked_mask
+    if not primed:
+        return 0.0, 0.0
+
+    runs = []  # (ep1, ep2, val)  ep = (x, y) or None
+
+    def add_run(x1, y1, x2, y2, val):
+        inb1 = 0 <= x1 < 8 and 0 <= y1 < 8
+        inb2 = 0 <= x2 < 8 and 0 <= y2 < 8
+        b1 = not inb1 or bool(blocked & (1 << (y1 * 8 + x1)))
+        b2 = not inb2 or bool(blocked & (1 << (y2 * 8 + x2)))
+        if not b1 or not b2:
+            runs.append((None if b1 else (x1, y1), None if b2 else (x2, y2), val))
+
+    # Horizontal runs — endpoints are squares just outside the run
+    for y in range(8):
+        rs = rl = 0
+        for x in range(9):
+            has = x < 8 and bool(primed & (1 << (y * 8 + x)))
+            if has:
+                if rl == 0:
+                    rs = x
+                rl += 1
+            elif rl >= 2:
+                add_run(rs - 1, y, x, y, _CARPET_PTS[min(rl, 7)])
+                rl = 0
+            else:
+                rl = 0
+
+    # Vertical runs — endpoints are squares just outside the run
+    for x in range(8):
+        rs = rl = 0
+        for y in range(9):
+            has = y < 8 and bool(primed & (1 << (y * 8 + x)))
+            if has:
+                if rl == 0:
+                    rs = y
+                rl += 1
+            elif rl >= 2:
+                add_run(x, rs - 1, x, y, _CARPET_PTS[min(rl, 7)])
+                rl = 0
+            else:
+                rl = 0
+
+    if not runs:
+        return 0.0, 0.0
+
+    runs.sort(key=lambda r: r[2], reverse=True)
+
+    px, py = player_loc
+    ox, oy = opp_loc
+
+    def dist_to_run(wx, wy, ep1, ep2):
+        d = float("inf")
+        if ep1 is not None:
+            d = min(d, abs(ep1[0] - wx) + abs(ep1[1] - wy))
+        if ep2 is not None:
+            d = min(d, abs(ep2[0] - wx) + abs(ep2[1] - wy))
+        return d
+
+    player_best = 0.0
+    opp_best = 0.0
+    for ep1, ep2, val in runs:
+        dp = dist_to_run(px, py, ep1, ep2)
+        do = dist_to_run(ox, oy, ep1, ep2)
+        if dp <= do:
+            if player_best == 0.0:
+                player_best = val * math.exp(-dp / 4)
+        else:
+            if opp_best == 0.0:
+                opp_best = val * math.exp(-do / 4)
+        if player_best > 0.0 and opp_best > 0.0:
+            break
+
+    return player_best, opp_best
+
+
+def _evaluate(board: Board):
     """Static evaluation from perspective of board.player_worker."""
     if board.is_game_over():
         w = board.get_winner()
@@ -183,42 +266,24 @@ def _evaluate(board):
     player_loc = player.get_location()
     opponent_loc = opponent.get_location()
 
-    score_diff = float(player.get_points() - opponent.get_points())
-    turn_diff = float(player.turns_left - opponent.turns_left)
+    score_diff = player.get_points() - opponent.get_points()
 
+    tc = board.turn_count
+    if tc > 77:
+        return score_diff
+
+    # Count primes for midgame factor
     player_moves = board.get_valid_moves(enemy=False, exclude_search=True)
     opponent_moves = board.get_valid_moves(enemy=True, exclude_search=True)
+    player_prime_count = sum(1 for mv in player_moves if mv.move_type == MoveType.PRIME)
+    opponent_prime_count = sum(
+        1 for mv in opponent_moves if mv.move_type == MoveType.PRIME
+    )
 
-    # Inline _tact for both sides to avoid function call overhead
-    player_best_carpet = 0
-    player_carpet_sum = 0
-    player_prime_count = 0
-    for mv in player_moves:
-        mt = mv.move_type
-        if mt == MoveType.CARPET:
-            rl = mv.roll_length
-            pts = _CARPET_EVALUATIONS[rl] if 0 <= rl < len(_CARPET_EVALUATIONS) else 0.0
-            if pts > player_best_carpet:
-                player_best_carpet = pts
-            if pts > 0:
-                player_carpet_sum += pts
-        elif mt == MoveType.PRIME:
-            player_prime_count += 1
-
-    opponent_best_carpet = 0
-    opponent_carpet_sum = 0
-    opponent_prime_count = 0
-    for mv in opponent_moves:
-        mt = mv.move_type
-        if mt == MoveType.CARPET:
-            rl = mv.roll_length
-            pts = _CARPET_EVALUATIONS[rl] if 0 <= rl < len(_CARPET_EVALUATIONS) else 0.0
-            if pts > opponent_best_carpet:
-                opponent_best_carpet = pts
-            if pts > 0:
-                opponent_carpet_sum += pts
-        elif mt == MoveType.PRIME:
-            opponent_prime_count += 1
+    # Primed-run ownership for best carpet
+    player_best_carpet, opponent_best_carpet = _best_carpet_for_sides(
+        board, player_loc, opponent_loc
+    )
 
     # Local openness — bitmask-based for speed
     blocked = board._blocked_mask
@@ -256,57 +321,41 @@ def _evaluate(board):
     player_extension = _ext(board, player_loc, player_loc, opponent_loc)
     opponent_extension = _ext(board, opponent_loc, player_loc, opponent_loc)
 
-    # Line freedom: only relevant mid-game (turns 16–60 of 80).
-    # Ramp in from turn 10→20, full weight 20→55, ramp out 55→65.
-    tc = board.turn_count
+    # Ramp in turn 10→20, full 20→55, ramp out 55→65
     if tc < 10:
-        lf_weight = 0.0
+        midgame_multiplier = 0.0
     elif tc < 20:
-        lf_weight = (tc - 10) / 10.0
+        midgame_multiplier = (tc - 10) / 10.0
     elif tc < 55:
-        lf_weight = 1.0
+        midgame_multiplier = 1.0
     elif tc < 65:
-        lf_weight = (65 - tc) / 10.0
+        midgame_multiplier = (65 - tc) / 10.0
     else:
-        lf_weight = 0.0
+        midgame_multiplier = 0.0
 
-    if lf_weight > 0:
+    if midgame_multiplier > 0:
         player_lf, player_best_line = _line_freedom(
             board, player_loc, player_loc, opponent_loc
         )
         opponent_lf, opponent_best_line = _line_freedom(
             board, opponent_loc, player_loc, opponent_loc
         )
+        midgame_factors = midgame_multiplier * (
+            0.10 * (player_lf - opponent_lf)
+            + 0.30 * (player_best_line - opponent_best_line)
+            + 0.10 * (player_center - opponent_center)
+            + 0.10 * (player_prime_count - opponent_prime_count)
+            + 0.10 * (player_openness - opponent_openness)
+            + 0.20 * (player_extension - opponent_extension)
+        )
     else:
-        player_lf = opponent_lf = 0.0
-        player_best_line = opponent_best_line = 0
+        midgame_factors = 0.0
 
-    # Denial: when ahead in late game, increase weight on opponent's
-    # positional terms to actively block their scoring opportunities.
-    turns_left = max(1, player.turns_left)
-    denial = 0.0
-    if score_diff > 0 and turns_left <= 20:
-        denial = min(0.5, 0.025 * (20 - turns_left) * min(score_diff, 12) / 12.0)
-
-    v = (
+    return (
         score_diff
-        + 0.06 * turn_diff
-        + 0.14 * (len(player_moves) - len(opponent_moves))
-        + 0.47 * player_best_carpet
-        - (0.47 + denial) * opponent_best_carpet
-        + 0.1 * (player_carpet_sum - opponent_carpet_sum)
-        + 0.17 * (player_prime_count - opponent_prime_count)
-        + 0.11 * (player_openness - opponent_openness)
-        + 0.07 * (player_center - opponent_center)
-        + 0.17 * player_extension
-        - (0.17 + denial) * opponent_extension
-        + 0.10 * lf_weight * player_lf
-        - (0.10 + denial * 0.5) * lf_weight * opponent_lf
-        + 0.05 * lf_weight * player_best_line
-        - (0.05 + denial * 0.3) * lf_weight * opponent_best_line
+        + 0.50 * (player_best_carpet - opponent_best_carpet)
+        + midgame_factors
     )
-
-    return v
 
 
 def _line_freedom(board, loc, player_loc, opp_loc):
@@ -332,6 +381,8 @@ def _line_freedom(board, loc, player_loc, opp_loc):
             bit = 1 << (cy * 8 + cx)
             if (occupied & bit) or (cx == px and cy == py) or (cx == ox and cy == oy):
                 break
+            if abs(cx - ox) + abs(cy - oy) < count1 + 1:
+                break
             count1 += 1
             cx += dx1
             cy += dy1
@@ -341,6 +392,8 @@ def _line_freedom(board, loc, player_loc, opp_loc):
         while 0 <= cx < 8 and 0 <= cy < 8:
             bit = 1 << (cy * 8 + cx)
             if (occupied & bit) or (cx == px and cy == py) or (cx == ox and cy == oy):
+                break
+            if abs(cx - ox) + abs(cy - oy) < count2 + 1:
                 break
             count2 += 1
             cx += dx2
@@ -465,7 +518,9 @@ class Expectiminimax:
         turns_remaining = (
             board.player_worker.turns_left + board.opponent_worker.turns_left
         )
-        effective_max = min(self.max_depth, max(1, turns_remaining))
+        effective_max = min(self.max_depth, max(1, turns_remaining - 1))
+
+        best_moves = []
 
         # Iterative deepening with PVS
         for depth in range(1, effective_max + 1):
@@ -504,11 +559,32 @@ class Expectiminimax:
             if d_val > -1e17:
                 best_value = d_val
                 best_move = d_best
+                best_moves.append((d_best, d_val))
                 if d_best in ordered:
                     ordered.remove(d_best)
                     ordered.insert(0, d_best)
             if not done:
                 break
+
+        last_3: list[tuple[Move, float]] = (
+            best_moves[-3:] if len(best_moves) >= 3 else best_moves
+        )
+
+        if last_3:
+            summary = {}
+            for idx, (mv, val) in enumerate(last_3):
+                mk = _move_key(mv)
+                if mk in summary:
+                    count, _, _ = summary[mk]
+                    summary[mk] = (count + 1, idx, (mv, val))
+                else:
+                    summary[mk] = (1, idx, (mv, val))
+
+                _, _, (best_move, best_value) = max(
+                    summary.values(),
+                    key=lambda item: (item[0], item[1]),  # most common, else deepest
+                )
+
         return best_move, best_value
 
     def _negamax(self, board, depth, alpha, beta):

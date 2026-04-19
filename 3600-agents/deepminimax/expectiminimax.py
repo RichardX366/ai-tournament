@@ -15,9 +15,6 @@ from game.enums import (
     loc_after_direction,
 )
 
-_rat_xy = None
-_rat_prob = 0.0
-
 # ── constants ─────────────────────────────────────────────────────────────────
 _INF = float("inf")
 _CARPET_PTS = [0, -1, 2, 4, 6, 10, 15, 21]
@@ -115,12 +112,6 @@ def _order_moves_full(board, moves, evaluate_fn):
                 else 0.0
             )
         score = -evaluate_fn(child) + 0.55 * points
-        if _rat_xy is not None and _rat_prob > 0.20:
-            rx, ry = _rat_xy
-            child_loc = child.player_worker.get_location()
-            cx, cy = child_loc
-            rat_dist = abs(cx - rx) + abs(cy - ry)
-            score += 0.3 * _rat_prob * (1.0 / (rat_dist + 1))
         scored.append((score, move))
     scored.sort(key=lambda t: t[0], reverse=True)
     ordered = [move for _, move in scored]
@@ -147,6 +138,32 @@ def _order_moves_fast(board, moves):
     position = board.player_worker.get_location()
     pos_x, pos_y = position
     primed_mask = board._primed_mask
+
+    # Precompute plain-tile count on each board edge, mapped to the direction
+    # that faces it. Used to score plain moves toward open sides.
+    occupied = board._blocked_mask | board._primed_mask | board._carpet_mask
+    edge_counts = {
+        Direction.UP: sum(0 if occupied & (1 << x) else 1 for x in range(8)),
+        Direction.DOWN: sum(0 if occupied & (1 << (56 + x)) else 1 for x in range(8)),
+        Direction.LEFT: sum(0 if occupied & (1 << (y * 8)) else 1 for y in range(8)),
+        Direction.RIGHT: sum(
+            0 if occupied & (1 << (y * 8 + 7)) else 1 for y in range(8)
+        ),
+    }
+    # Rank directions high→low, ties take the lower score (0→3 maps to 1.5→0)
+    sorted_dirs = sorted(_DIRECTIONS, key=lambda d: edge_counts[d], reverse=True)
+    _score_slots = [1.5, 1.0, 0.5, 0.0]
+    plain_score: dict = {}
+    i = 0
+    while i < 4:
+        j = i
+        while j < 4 and edge_counts[sorted_dirs[j]] == edge_counts[sorted_dirs[i]]:
+            j += 1
+        group_score = _score_slots[j - 1]  # ties take the lowest slot in the group
+        for k in range(i, j):
+            plain_score[sorted_dirs[k]] = group_score
+        i = j
+
     scored = []
     for move in moves:
         move_type = move.move_type
@@ -168,8 +185,8 @@ def _order_moves_fast(board, moves):
                 and (primed_mask & (1 << (behind_y * 8 + behind_x)))
             ):
                 score += 4
-        else:
-            score = 0.0
+        else:  # PLAIN
+            score = plain_score.get(move.direction, 0.0)
         scored.append((score, move))
     scored.sort(key=lambda t: t[0], reverse=True)
     return [move for _, move in scored]
@@ -262,14 +279,6 @@ def _best_carpet_for_sides(board, player_loc, opp_loc):
 
 def _evaluate(board: Board):
     """Static evaluation from perspective of board.player_worker."""
-    if board.is_game_over():
-        w = board.get_winner()
-        if w == Result.PLAYER:
-            return 999.0
-        if w == Result.ENEMY:
-            return -999.0
-        return 0.0
-
     player = board.player_worker
     opponent = board.opponent_worker
     player_loc = player.get_location()
@@ -285,7 +294,9 @@ def _evaluate(board: Board):
     player_moves = board.get_valid_moves(enemy=False, exclude_search=True)
     opponent_moves = board.get_valid_moves(enemy=True, exclude_search=True)
     player_prime_count = sum(1 for mv in player_moves if mv.move_type == MoveType.PRIME)
-    opponent_prime_count = sum(1 for mv in opponent_moves if mv.move_type == MoveType.PRIME)
+    opponent_prime_count = sum(
+        1 for mv in opponent_moves if mv.move_type == MoveType.PRIME
+    )
 
     # Primed-run ownership for best carpet
     player_best_carpet, opponent_best_carpet = _best_carpet_for_sides(
@@ -357,22 +368,11 @@ def _evaluate(board: Board):
         )
     else:
         midgame_factors = 0.0
-    
-    rat_pull = 0.0
-    if _rat_xy is not None and _rat_prob > 0.20:
-        rx, ry = _rat_xy
-        p_dist = abs(player_x - rx) + abs(player_y - ry)
-        o_dist = abs(opponent_x - rx) + abs(opponent_y - ry)
-        rat_pull = 0.25 * _rat_prob * (o_dist - p_dist)
-        # Positive when we're closer to the rat than opponent
-    else:
-        rat_pull = 0.0
 
     return (
         score_diff
         + 0.50 * (player_best_carpet - opponent_best_carpet)
         + midgame_factors
-        + rat_pull
     )
 
 
@@ -497,13 +497,10 @@ class Expectiminimax:
         self._nodes = 0
         self._tt: dict = {}  # {board_key: (score, depth, flag, best_move_key)}
         self._tt_hits = 0
-        self._rat_xy = None   # (x, y) best guess
-        self._rat_prob = 0.0
 
-    def search(self, board, rat_belief, time_budget=1.0):
+    def search(self, board, time_budget=1.0):
         deadline = time.perf_counter() + time_budget
         self._deadline = deadline
-        self._rat_belief = rat_belief
         self._nodes = 0
         self._tt_hits = 0
 
@@ -538,16 +535,9 @@ class Expectiminimax:
         turns_remaining = (
             board.player_worker.turns_left + board.opponent_worker.turns_left
         )
-        effective_max = min(self.max_depth, max(1, turns_remaining - 1))
+        effective_max = min(self.max_depth, max(1, turns_remaining))
 
         best_moves = []
-
-        global _rat_xy, _rat_prob
-        if rat_belief is not None:
-            _rat_xy = rat_belief.weighted_target()
-            _rat_prob = rat_belief.best_prob
-        else:
-            _rat_xy, _rat_prob = None, 0.0
 
         # Iterative deepening with PVS
         for depth in range(1, effective_max + 1):
@@ -673,9 +663,14 @@ class Expectiminimax:
             if i == 0:
                 val = -self._negamax(child, depth - 1, -beta, -alpha)
             else:
-                val = -self._negamax(child, depth - 1, -alpha - 0.01, -alpha)
-                if val > alpha and val < beta:
-                    val = -self._negamax(child, depth - 1, -beta, -alpha)
+                # LMR: reduce depth for late moves at sufficient depth
+                reduce = 1 if (i >= 3 and depth >= 3) else 0
+                val = -self._negamax(child, depth - 1 - reduce, -alpha - 0.01, -alpha)
+                if val > alpha:
+                    # Re-search at full depth
+                    val = -self._negamax(child, depth - 1, -alpha - 0.01, -alpha)
+                    if val > alpha and val < beta:
+                        val = -self._negamax(child, depth - 1, -beta, -alpha)
 
             if val > best:
                 best = val

@@ -224,7 +224,7 @@ def play_game(
     record=True,
     limit_resources=False,
     use_gpu=False,
-):
+) -> tuple[Board, list[tuple[int, int]], tuple[int, int], tuple[int, int], str, str]:
     # setup main environment, import player modules
     import os
     import sys

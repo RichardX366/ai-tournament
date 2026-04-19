@@ -15,7 +15,7 @@ from gameplay import play_game
 PAIRS = 32
 
 
-def _extract_a_b_workers(board: Board):
+def extract_a_b_workers(board: Board):
     if board.player_worker.is_player_a:
         return board.player_worker, board.opponent_worker
     return board.opponent_worker, board.player_worker
@@ -61,7 +61,7 @@ def worker(player_a_name, player_b_name, play_directory, i, return_dict, seed=No
             )
         )
 
-    worker_a, worker_b = _extract_a_b_workers(final_board)
+    worker_a, worker_b = extract_a_b_workers(final_board)
     return_dict[i] = {
         "result": ResultArbiter(final_board.get_winner()).name,
         "time_left_end": {
@@ -267,7 +267,9 @@ def _print_report(r):
         else:
             print("Effect size too small to detect reliably.")
     print(f"\n  Pair margins: {[f'{m:+.1f}' for m in r['paired_margins']]}")
-    print(f"  Avg time left — {a}: {r['avg_time_left_a']:.1f}s  |  {b}: {r['avg_time_left_b']:.1f}s")
+    print(
+        f"  Avg time left — {a}: {r['avg_time_left_a']:.1f}s  |  {b}: {r['avg_time_left_b']:.1f}s"
+    )
     print(f"  Time: {r['elapsed_s']:.1f}s")
     print("=" * 60)
     print()

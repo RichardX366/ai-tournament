@@ -335,12 +335,6 @@
 
   // --- Static evaluation -------------------------------------------------
   function evaluate(board, logComponents = false) {
-    if (board.is_game_over()) {
-      const w = board.get_winner();
-      if (w === Result.PLAYER) return 999;
-      if (w === Result.ENEMY) return -999;
-      return 0;
-    }
     const player = board.player_worker;
     const opponent = board.opponent_worker;
     const [px, py] = player.get_location();
@@ -741,7 +735,7 @@
     // Cap depth at remaining game turns
     const turnsRemaining =
       board.player_worker.turns_left + board.opponent_worker.turns_left;
-    const effectiveMax = Math.min(maxDepth, Math.max(1, turnsRemaining - 1));
+    const effectiveMax = Math.min(maxDepth, Math.max(1, turnsRemaining));
 
     const now =
       typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -765,6 +759,9 @@
         tt,
       );
       const val = -res.value;
+      if (board.turn_count + effectiveMax >= 78) {
+        board.turn_count = 78;
+      }
       results.push({
         move: mv,
         score: val - evaluate(board),

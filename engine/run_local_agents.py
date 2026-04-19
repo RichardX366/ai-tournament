@@ -6,6 +6,7 @@ import multiprocessing
 
 from board_utils import get_history_json
 from gameplay import play_game
+from run_multiple_agents import extract_a_b_workers
 
 
 def main():
@@ -38,6 +39,11 @@ def main():
     sim_time = time.perf_counter() - sim_time
     turn_count = final_board.turn_count
     print(f"{sim_time:.2f} seconds elapsed, {turn_count} rounds.")
+
+    worker_a, worker_b = extract_a_b_workers(final_board)
+
+    print(f"A Time Left: {worker_a.time_left:.2f} seconds")
+    print(f"B Time Left: {worker_b.time_left:.2f} seconds")
 
     records_dir = os.path.join(play_directory, "matches")
     os.makedirs(records_dir, exist_ok=True)

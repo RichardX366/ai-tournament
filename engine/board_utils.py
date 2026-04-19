@@ -1,23 +1,31 @@
 import random
 
 from game.board import Board
-from game.enums import Cell, MoveType, WinReason, BOARD_SIZE, ALLOWED_TIME, MAX_TURNS_PER_PLAYER
+from game.enums import (
+    Cell,
+    MoveType,
+    WinReason,
+    BOARD_SIZE,
+    ALLOWED_TIME,
+    MAX_TURNS_PER_PLAYER,
+)
 from game.rat import Rat
 import numpy as np
+
 
 def get_board_string(board: Board, rat: Rat):
     """
     Returns a colored, bordered string representation of the current board state.
     Cells are 3 chars wide; borders are dimmed so content stands out.
     """
-    RESET      = "\033[0m"
-    DIM        = "\033[2;37m"      # dim gray  — borders and labels
-    BG_PRIMED  = "\033[43m"        # yellow background
-    BG_CARPET  = "\033[42m"        # green background
-    BG_BLOCKED = "\033[100m"       # dark gray background
-    FG_A       = "\033[1;94m"      # bold bright blue   (player A)
-    FG_B       = "\033[1;91m"      # bold bright red    (player B)
-    FG_RAT     = "\033[1;93m"      # bold bright yellow (rat)
+    RESET = "\033[0m"
+    DIM = "\033[2;37m"  # dim gray  — borders and labels
+    BG_PRIMED = "\033[43m"  # yellow background
+    BG_CARPET = "\033[42m"  # green background
+    BG_BLOCKED = "\033[100m"  # dark gray background
+    FG_A = "\033[1;94m"  # bold bright blue   (player A)
+    FG_B = "\033[1;91m"  # bold bright red    (player B)
+    FG_RAT = "\033[1;93m"  # bold bright yellow (rat)
 
     if board.player_worker.is_player_a:
         worker_a = board.player_worker
@@ -83,7 +91,9 @@ def get_board_string(board: Board, rat: Rat):
     )
 
 
-def get_history_dict(board: Board, rat_position_history, spawn_a, spawn_b, errlog_a="", errlog_b=""):
+def get_history_dict(
+    board: Board, rat_position_history, spawn_a, spawn_b, errlog_a="", errlog_b=""
+):
     """
     Converts board history to a dictionary format for JSON serialization.
 
@@ -103,15 +113,15 @@ def get_history_dict(board: Board, rat_position_history, spawn_a, spawn_b, errlo
     board_hist = board.history
     a_pos = [spawn_a]
     b_pos = [spawn_b]
-    
+
     for turn_index, pos in enumerate(board_hist.pos):
         if turn_index % 2 == 0:
             # Player A's turn
             a_pos.append(pos)
-            b_pos.append(b_pos[-1]) # Player B stays where they were
+            b_pos.append(b_pos[-1])  # Player B stays where they were
         else:
             # Player B's turn
-            a_pos.append(a_pos[-1]) # Player A stays where they were
+            a_pos.append(a_pos[-1])  # Player A stays where they were
             b_pos.append(pos)
 
     history_dict = {
@@ -131,12 +141,18 @@ def get_history_dict(board: Board, rat_position_history, spawn_a, spawn_b, errlo
     for i in range(1, len(history_dict["left_behind_enums"])):
         move_type = history_dict["left_behind_enums"][i]
         new_carpet = []
-        
+
         if move_type == MoveType.CARPET:
-            is_player_a = (i % 2 != 0) 
-            
-            last_pos = history_dict["a_pos"][i-1] if is_player_a else history_dict["b_pos"][i-1]
-            next_pos = history_dict["a_pos"][i] if is_player_a else history_dict["b_pos"][i]
+            is_player_a = i % 2 != 0
+
+            last_pos = (
+                history_dict["a_pos"][i - 1]
+                if is_player_a
+                else history_dict["b_pos"][i - 1]
+            )
+            next_pos = (
+                history_dict["a_pos"][i] if is_player_a else history_dict["b_pos"][i]
+            )
 
             min_x, max_x = min(last_pos[0], next_pos[0]), max(last_pos[0], next_pos[0])
             min_y, max_y = min(last_pos[1], next_pos[1]), max(last_pos[1], next_pos[1])
@@ -145,7 +161,7 @@ def get_history_dict(board: Board, rat_position_history, spawn_a, spawn_b, errlo
                 for y in range(min_y, max_y + 1):
                     if (x, y) != last_pos:
                         new_carpet.append((x, y))
-                    
+
         new_carpets.append(new_carpet)
     history_dict["new_carpets"] = new_carpets
 
@@ -168,7 +184,7 @@ def get_history_dict(board: Board, rat_position_history, spawn_a, spawn_b, errlo
 
     # Note: do not add initial spawn position. gameplay.py does that already
     history_dict["rat_position_history"] = rat_position_history
-    
+
     # Add metadata
     history_dict["errlog_a"] = errlog_a
     history_dict["errlog_b"] = errlog_b
@@ -186,7 +202,9 @@ def get_history_dict(board: Board, rat_position_history, spawn_a, spawn_b, errlo
     return history_dict
 
 
-def get_history_json(board: Board, rat_position_history, spawn_a, spawn_b, err_a="", err_b=""):
+def get_history_json(
+    board: Board, rat_position_history, spawn_a, spawn_b, err_a="", err_b=""
+):
     """
     Encodes the entire history of the game in a format readable by the renderer.
 
@@ -208,6 +226,7 @@ def get_history_json(board: Board, rat_position_history, spawn_a, spawn_b, err_a
             # JAX arrays: convert to numpy first, then fall through
             try:
                 import jax.numpy as jnp
+
                 if isinstance(obj, jnp.ndarray):
                     obj = np.asarray(obj)
             except ImportError:
@@ -220,11 +239,50 @@ def get_history_json(board: Board, rat_position_history, spawn_a, spawn_b, err_a
                 return obj.tolist()
             return super(NpEncoder, self).default(obj)
 
-    return json.dumps(get_history_dict(board, rat_position_history, spawn_a, spawn_b, err_a, err_b), cls=NpEncoder)
+    return json.dumps(
+        get_history_dict(board, rat_position_history, spawn_a, spawn_b, err_a, err_b),
+        cls=NpEncoder,
+    )
+
 
 def generate_spawns(board: Board):
     # Both players spawn in the center 4×4 (x=2–5, y=2–5), mirrored on the same row.
     x = random.randint(BOARD_SIZE // 2 - 2, BOARD_SIZE // 2 - 1)  # 2 or 3
     y = random.randint(BOARD_SIZE // 2 - 2, BOARD_SIZE // 2 + 1)  # center 4×4
     return (x, y), (BOARD_SIZE - 1 - x, y)
-    
+
+
+def from_board_array(
+    board: list[list[str]], a_pos: tuple[int, int], b_pos: tuple[int, int]
+) -> Board:
+    """
+    Utility function to create a Board object from a 2D array representation.
+    Used for testing and debugging.
+
+    Parameters:
+        board: 2D list of strings representing the board state. Each cell can be:
+            - " ": empty
+            - "P": primed
+            - "C": carpet
+            - "B": blocked
+        a_pos: Tuple (x, y) for player A's position
+        b_pos: Tuple (x, y) for player B's position
+        rat_pos: Tuple (x, y) for the rat's position
+
+    Returns:
+        Board object initialized with the given state.
+    """
+    new_board = Board()
+    for y in range(len(board)):
+        for x in range(len(board[y])):
+            cell = board[y][x]
+            if cell == "P":
+                new_board.set_cell((x, y), Cell.PRIMED)
+            elif cell == "C":
+                new_board.set_cell((x, y), Cell.CARPET)
+            elif cell == "B":
+                new_board.set_cell((x, y), Cell.BLOCKED)
+    new_board.player_worker.position = a_pos
+    new_board.opponent_worker.position = b_pos
+
+    return new_board

@@ -239,28 +239,48 @@
   // --- Primed run ownership ------------------------------------------------
   // Each horizontal/vertical run of primed tiles (length >= 2) is treated as
   // one indivisible unit.  A run is claimed by whichever agent has the smaller
-  // Manhattan distance to either of its (non-blocked) endpoints — player wins
-  // ties.  Runs are processed highest-value first; each side's first claim is
-  // their best.  No two claims from different sides can come from the same run.
+  // Manhattan distance to their closest endpoint — player wins ties.  Each
+  // endpoint carries its own value: full carpet length for a valid outside
+  // square, rl-1 for a fallback into the first/last primed square (when the
+  // true outside square is blocked/OOB).  Fallback on a length-2 run yields
+  // effective length 1 and is excluded entirely.  Runs are processed
+  // highest-value first; each side records only its best.
   // Returns [playerBest, opponentBest].
   function bestCarpetForSides(board, playerLoc, oppLoc) {
     const primed = board._primed_mask;
     const blocked = board._blocked_mask;
     if (primed === 0n) return [0, 0];
 
-    const runs = []; // { ep1: [x,y]|null, ep2: [x,y]|null, val }
+    const runs = []; // { ep1, val1, ep2, val2, inner1, inner2 } — ep/val may be null if excluded
 
-    function addRun(x1, y1, x2, y2, val) {
+    function addRun(x1, y1, x2, y2, rl, fb1x, fb1y, fb2x, fb2y) {
       const inB1 = x1 >= 0 && x1 < 8 && y1 >= 0 && y1 < 8;
       const inB2 = x2 >= 0 && x2 < 8 && y2 >= 0 && y2 < 8;
       const b1 = !inB1 || (blocked & bitAt(x1, y1)) !== 0n;
       const b2 = !inB2 || (blocked & bitAt(x2, y2)) !== 0n;
-      if (!b1 || !b2)
-        runs.push({
-          ep1: b1 ? null : [x1, y1],
-          ep2: b2 ? null : [x2, y2],
-          val,
-        });
+      const ep1 = b1 && rl === 2 ? null : b1 ? [fb1x, fb1y] : [x1, y1];
+      const ep2 = b2 && rl === 2 ? null : b2 ? [fb2x, fb2y] : [x2, y2];
+      if (ep1 === null && ep2 === null) return;
+      const val1 =
+        ep1 === null
+          ? null
+          : b1
+            ? CARPET_PTS[Math.min(rl - 1, 7)]
+            : CARPET_PTS[Math.min(rl, 7)];
+      const val2 =
+        ep2 === null
+          ? null
+          : b2
+            ? CARPET_PTS[Math.min(rl - 1, 7)]
+            : CARPET_PTS[Math.min(rl, 7)];
+      runs.push({
+        ep1,
+        val1,
+        ep2,
+        val2,
+        inner1: [fb1x, fb1y],
+        inner2: [fb2x, fb2y],
+      });
     }
 
     // Horizontal runs — endpoints are the squares just outside the run
@@ -273,7 +293,7 @@
           if (rl === 0) rs = x;
           rl++;
         } else if (rl >= 2) {
-          addRun(rs - 1, y, x, y, CARPET_PTS[Math.min(rl, 7)]);
+          addRun(rs - 1, y, x, y, rl, rs, y, x - 1, y);
           rl = 0;
         } else {
           rl = 0;
@@ -291,7 +311,7 @@
           if (rl === 0) rs = y;
           rl++;
         } else if (rl >= 2) {
-          addRun(x, rs - 1, x, y, CARPET_PTS[Math.min(rl, 7)]);
+          addRun(x, rs - 1, x, y, rl, x, rs, x, y - 1);
           rl = 0;
         } else {
           rl = 0;
@@ -301,31 +321,63 @@
 
     if (!runs.length) return [0, 0];
 
-    runs.sort((a, b) => b.val - a.val);
+    runs.sort((a, b) => {
+      const aMax = Math.max(...[a.val1, a.val2].filter((v) => v !== null));
+      const bMax = Math.max(...[b.val1, b.val2].filter((v) => v !== null));
+      return bMax - aMax;
+    });
 
     const [px, py] = playerLoc;
     const [ox, oy] = oppLoc;
 
-    function distToRun(wx, wy, { ep1, ep2 }) {
-      let d = Infinity;
-      if (ep1) d = Math.min(d, Math.abs(ep1[0] - wx) + Math.abs(ep1[1] - wy));
-      if (ep2) d = Math.min(d, Math.abs(ep2[0] - wx) + Math.abs(ep2[1] - wy));
-      return d;
+    function closestEndpoint(wx, wy, ep1, val1, ep2, val2) {
+      const d1 =
+        ep1 !== null ? Math.abs(ep1[0] - wx) + Math.abs(ep1[1] - wy) : Infinity;
+      const d2 =
+        ep2 !== null ? Math.abs(ep2[0] - wx) + Math.abs(ep2[1] - wy) : Infinity;
+      return d1 <= d2 ? { d: d1, val: val1 } : { d: d2, val: val2 };
     }
 
-    // Runs are sorted by raw value for claiming priority.
-    // The returned score is distance-weighted: val * exp(-dist / 4),
-    // so carpets the player is right next to score near their full value
-    // while distant carpets contribute much less.
+    function bestPathTo(wx, wy, targetIdx, visited, cumDist) {
+      const { ep1, val1, ep2, val2 } = runs[targetIdx];
+      const cur = closestEndpoint(wx, wy, ep1, val1, ep2, val2);
+      let bestD = cumDist + cur.d;
+      let bestScore = cur.val * Math.exp(-(cumDist + cur.d) / 4);
+      for (let j = 0; j < runs.length; j++) {
+        if (j === targetIdx || visited.has(j)) continue;
+        const { ep1: mEp1, val1: mVal1, ep2: mEp2, val2: mVal2, inner1, inner2 } = runs[j];
+        const d1 = mEp1 !== null ? Math.abs(mEp1[0] - wx) + Math.abs(mEp1[1] - wy) : Infinity;
+        const d2 = mEp2 !== null ? Math.abs(mEp2[0] - wx) + Math.abs(mEp2[1] - wy) : Infinity;
+        const dNear = d1 <= d2 ? d1 : d2;
+        const valM = d1 <= d2 ? mVal1 : mVal2;
+        const exitPt = d1 <= d2 ? inner2 : inner1;
+        if (dNear === Infinity || valM === null) continue;
+        const exitR = closestEndpoint(exitPt[0], exitPt[1], ep1, val1, ep2, val2);
+        if (dNear + 1 + exitR.d >= cur.d) continue;
+        const mScore = valM * Math.exp(-(cumDist + dNear) / 4);
+        visited.add(j);
+        const child = bestPathTo(exitPt[0], exitPt[1], targetIdx, visited, cumDist + dNear + 1);
+        visited.delete(j);
+        const total = mScore + child.score;
+        if (total > bestScore) {
+          bestScore = total;
+          bestD = child.d;
+        }
+      }
+      return { d: bestD, score: bestScore };
+    }
+
+    // Runs sorted by best endpoint value; each side claims its first (best) run.
+    // Score is exp(-d/4) distance-weighted, with shortcut chains through intermediate runs.
     let playerBest = 0,
       opponentBest = 0;
-    for (const run of runs) {
-      const dp = distToRun(px, py, run);
-      const dop = distToRun(ox, oy, run);
-      if (dp <= dop) {
-        if (playerBest === 0) playerBest = run.val * Math.exp(-dp / 4);
+    for (let i = 0; i < runs.length; i++) {
+      const p = bestPathTo(px, py, i, new Set(), 0);
+      const o = bestPathTo(ox, oy, i, new Set(), 0);
+      if (p.d <= o.d) {
+        if (playerBest === 0) playerBest = p.score;
       } else {
-        if (opponentBest === 0) opponentBest = run.val * Math.exp(-dop / 4);
+        if (opponentBest === 0) opponentBest = o.score;
       }
       if (playerBest > 0 && opponentBest > 0) break;
     }
@@ -759,12 +811,13 @@
         tt,
       );
       const val = -res.value;
-      if (board.turn_count + effectiveMax >= 78) {
-        board.turn_count = 78;
+      const b = board.get_copy();
+      if (b.turn_count + effectiveMax >= 78) {
+        b.turn_count = 78;
       }
       results.push({
         move: mv,
-        score: val - evaluate(board),
+        score: val - evaluate(b),
         label: moveLabel(mv),
         pv: [
           { label: moveLabel(mv), side: 0, pts: movePoints(mv), move: mv },
@@ -774,6 +827,10 @@
     }
 
     // Simulate Skipping Turn
+    const b = board.get_copy();
+    if (b.turn_count + effectiveMax >= 78) {
+      b.turn_count = 78;
+    }
     const child = board.get_copy();
     child.end_turn();
     child.reverse_perspective();
@@ -781,7 +838,7 @@
     const val = -res.value;
     results.push({
       move: Game.Move.search(),
-      score: val - evaluate(board),
+      score: val - evaluate(b),
       label: 'Search (Skip Turn)',
       pv: [
         {

@@ -197,22 +197,31 @@ def _order_moves_fast(board, moves):
 
 def _best_carpet_for_sides(board, player_loc, opp_loc):
     """Scan primed runs of length >= 2, assign each exclusively to the closer
-    player (Manhattan distance to outside endpoint; player wins ties).
-    Returns (player_best, opp_best) with exponential distance decay."""
+    player (Manhattan distance to closest endpoint; player wins ties).
+    Intermediate runs on the path to the target may be chained as shortcuts,
+    scoring their value and reducing effective distance.
+    Returns (player_best, opp_best) with exp(-d/4) distance decay."""
     primed = board._primed_mask
     blocked = board._blocked_mask
     if not primed:
         return 0.0, 0.0
 
-    runs = []  # (ep1, ep2, val)  ep = (x, y) or None
+    # (ep1, val1, ep2, val2, inner1, inner2)
+    # ep/val are None when that endpoint is excluded; inner points are always valid.
+    runs = []
 
-    def add_run(x1, y1, x2, y2, val):
+    def add_run(x1, y1, x2, y2, rl, fb1x, fb1y, fb2x, fb2y):
         inb1 = 0 <= x1 < 8 and 0 <= y1 < 8
         inb2 = 0 <= x2 < 8 and 0 <= y2 < 8
         b1 = not inb1 or bool(blocked & (1 << (y1 * 8 + x1)))
         b2 = not inb2 or bool(blocked & (1 << (y2 * 8 + x2)))
-        if not b1 or not b2:
-            runs.append((None if b1 else (x1, y1), None if b2 else (x2, y2), val))
+        ep1 = None if (b1 and rl == 2) else ((fb1x, fb1y) if b1 else (x1, y1))
+        ep2 = None if (b2 and rl == 2) else ((fb2x, fb2y) if b2 else (x2, y2))
+        if ep1 is None and ep2 is None:
+            return
+        val1 = None if ep1 is None else (_CARPET_PTS[min(rl - 1, 7)] if b1 else _CARPET_PTS[min(rl, 7)])
+        val2 = None if ep2 is None else (_CARPET_PTS[min(rl - 1, 7)] if b2 else _CARPET_PTS[min(rl, 7)])
+        runs.append((ep1, val1, ep2, val2, (fb1x, fb1y), (fb2x, fb2y)))
 
     # Horizontal runs — endpoints are squares just outside the run
     for y in range(8):
@@ -224,7 +233,7 @@ def _best_carpet_for_sides(board, player_loc, opp_loc):
                     rs = x
                 rl += 1
             elif rl >= 2:
-                add_run(rs - 1, y, x, y, _CARPET_PTS[min(rl, 7)])
+                add_run(rs - 1, y, x, y, rl, rs, y, x - 1, y)
                 rl = 0
             else:
                 rl = 0
@@ -239,7 +248,7 @@ def _best_carpet_for_sides(board, player_loc, opp_loc):
                     rs = y
                 rl += 1
             elif rl >= 2:
-                add_run(x, rs - 1, x, y, _CARPET_PTS[min(rl, 7)])
+                add_run(x, rs - 1, x, y, rl, x, rs, x, y - 1)
                 rl = 0
             else:
                 rl = 0
@@ -247,30 +256,58 @@ def _best_carpet_for_sides(board, player_loc, opp_loc):
     if not runs:
         return 0.0, 0.0
 
-    runs.sort(key=lambda r: r[2], reverse=True)
+    runs.sort(key=lambda r: max(v for v in (r[1], r[3]) if v is not None), reverse=True)
 
     px, py = player_loc
     ox, oy = opp_loc
 
-    def dist_to_run(wx, wy, ep1, ep2):
-        d = float("inf")
-        if ep1 is not None:
-            d = min(d, abs(ep1[0] - wx) + abs(ep1[1] - wy))
-        if ep2 is not None:
-            d = min(d, abs(ep2[0] - wx) + abs(ep2[1] - wy))
-        return d
+    def closest_endpoint(wx, wy, ep1, val1, ep2, val2):
+        d1 = (abs(ep1[0] - wx) + abs(ep1[1] - wy)) if ep1 is not None else float("inf")
+        d2 = (abs(ep2[0] - wx) + abs(ep2[1] - wy)) if ep2 is not None else float("inf")
+        return (d1, val1) if d1 <= d2 else (d2, val2)
+
+    def best_path_to(wx, wy, target_idx, visited, cum_dist):
+        ep1, val1, ep2, val2, _, _ = runs[target_idx]
+        d_cur, val_cur = closest_endpoint(wx, wy, ep1, val1, ep2, val2)
+        best_d = cum_dist + d_cur
+        best_score = val_cur * math.exp(-(cum_dist + d_cur) / 4)
+        for j, (m_ep1, m_val1, m_ep2, m_val2, m_inner1, m_inner2) in enumerate(runs):
+            if j == target_idx or j in visited:
+                continue
+            d1 = (abs(m_ep1[0] - wx) + abs(m_ep1[1] - wy)) if m_ep1 is not None else float("inf")
+            d2 = (abs(m_ep2[0] - wx) + abs(m_ep2[1] - wy)) if m_ep2 is not None else float("inf")
+            if d1 <= d2:
+                d_near, val_m, exit_pt = d1, m_val1, m_inner2
+            else:
+                d_near, val_m, exit_pt = d2, m_val2, m_inner1
+            if d_near == float("inf") or val_m is None:
+                continue
+            d_exit, _ = closest_endpoint(exit_pt[0], exit_pt[1], ep1, val1, ep2, val2)
+            if d_near + 1 + d_exit >= d_cur:
+                continue
+            m_score = val_m * math.exp(-(cum_dist + d_near) / 4)
+            visited.add(j)
+            child_d, child_score = best_path_to(
+                exit_pt[0], exit_pt[1], target_idx, visited, cum_dist + d_near + 1
+            )
+            visited.discard(j)
+            total = m_score + child_score
+            if total > best_score:
+                best_score = total
+                best_d = child_d
+        return best_d, best_score
 
     player_best = 0.0
     opp_best = 0.0
-    for ep1, ep2, val in runs:
-        dp = dist_to_run(px, py, ep1, ep2)
-        do = dist_to_run(ox, oy, ep1, ep2)
+    for i in range(len(runs)):
+        dp, p_score = best_path_to(px, py, i, set(), 0)
+        do, o_score = best_path_to(ox, oy, i, set(), 0)
         if dp <= do:
             if player_best == 0.0:
-                player_best = val * math.exp(-dp / 4)
+                player_best = p_score
         else:
             if opp_best == 0.0:
-                opp_best = val * math.exp(-do / 4)
+                opp_best = o_score
         if player_best > 0.0 and opp_best > 0.0:
             break
 

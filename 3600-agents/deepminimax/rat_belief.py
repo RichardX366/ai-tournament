@@ -199,10 +199,32 @@ class RatBelief:
         return 6.0 * p - 2.0
 
     def best_search_target(self) -> Tuple[Tuple[int, int], float]:
-        """Return (xy, ev) for the highest-EV cell to search."""
-        idx = int(jnp.argmax(self.belief))
-        xy = _idx_to_xy(idx)
-        return xy, self.ev_search(xy)
+        """Pick the search target that maximizes EV including one miss step."""
+        best_ev = -float('inf')
+        best_xy = self.best_guess()
+
+        top_k_indices = jnp.argsort(self.belief)[-8:]  # shape (8,), don't wrap in int()
+
+        for idx in top_k_indices:
+            xy = _idx_to_xy(int(idx))  # int() here on the scalar element is fine
+            p = float(self.belief[int(idx)])
+            hit_ev = p * 4.0
+
+            miss_belief = self.belief.at[int(idx)].set(0.0)
+            s = miss_belief.sum()
+            if s > 1e-12:
+                miss_belief = miss_belief / s
+                next_best_p = float(miss_belief.max())
+                miss_ev = (1 - p) * (-2.0 + 6.0 * next_best_p - 2.0)
+            else:
+                miss_ev = (1 - p) * -2.0
+
+            ev = hit_ev + miss_ev
+            if ev > best_ev:
+                best_ev = ev
+                best_xy = xy
+
+        return best_xy, best_ev
 
     def new_ev_if_miss(self) -> float:
         """EV of the best cell after the current best guess misses.
@@ -263,3 +285,14 @@ class RatBelief:
         likelihoods = (_DIST_PROBS[:, None] * matches).sum(axis=0)
 
         return jnp.maximum(likelihoods, 1e-9)
+
+    def weighted_target(self, top_n=5) -> Tuple[int, int]:
+        """Centroid of the top-N belief cells, weighted by probability."""
+        top_indices = jnp.argsort(self.belief)[-top_n:]
+        top_probs = self.belief[top_indices]
+        top_probs = top_probs / top_probs.sum()
+        xs = (_ALL_X[top_indices] * top_probs).sum()
+        ys = (_ALL_Y[top_indices] * top_probs).sum()
+        # Round to nearest integer cell
+        return (int(round(float(xs))), int(round(float(ys))))
+    

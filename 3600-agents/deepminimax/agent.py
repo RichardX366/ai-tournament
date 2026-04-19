@@ -38,43 +38,49 @@ class PlayerAgent:
         self.turn_number += 1
         noise, est_distance = sensor_data
 
-        # ── Update rat belief ─────────────────────────────────────────────────
         if self.rat_belief is not None:
             self.rat_belief.update(board, int(noise), int(est_distance))
 
-        # ── Time management (adaptive) ────────────────
+        # ── Time management (adaptive) ────────────────────────────────────────
         remaining = max(0.0, float(time_left()))
         turns_left = max(1, board.player_worker.turns_left)
         usable = max(0.15, remaining - 5.0)
         time_budget = min(5.5, max(0.15, 1.5 * usable / turns_left))
 
-        # ── Search for best movement move ────────────────────────────────────
+        # ── Rat-aware time split ──────────────────────────────────────────────
+        if self.rat_belief is not None:
+            rat_confidence = 1.0 - (self.rat_belief.entropy / 4.15)
+            # search_time_fraction: how much of budget goes to skip_cost negamax
+            # scales from 0.3 (uncertain) to 0.6 (very confident about rat)
+            search_time_fraction = 0.3 + 0.3 * rat_confidence
+        else:
+            search_time_fraction = 0.3
+
+        move_time = time_budget * (1.0 - search_time_fraction)
+        rat_time  = time_budget * search_time_fraction
+
+        # ── Search for best movement move ─────────────────────────────────────
         best_move, best_val = self.searcher.search(
             board,
             self.rat_belief,
-            time_budget,
+            move_time,          # <-- was time_budget
         )
 
-        # ── Rat search decision (skip-turn negamax comparison) ────────
-        # Search = skip a turn positionally but gain search_ev in expectation.
-        # Negamax the skipped board to get the full future cost of not moving.
-        # If search_ev > skip_cost, the rat points outweigh the lost position.
+        # ── Rat search decision ───────────────────────────────────────────────
         if self.rat_belief is not None:
             search_xy, search_ev = self.rat_belief.best_search_target()
             miss_ev = self.rat_belief.new_ev_if_miss()
             search_ev -= (
                 miss_ev * (1 - self.rat_belief.belief.max()) * 0.3
-            )  # Compare against the EV of not searching at all
+            )
 
             if search_ev > 0:
                 skip_board = board.get_copy()
                 skip_board.end_turn()
                 skip_board.reverse_perspective()
 
-                # Give the skip search a small time slice
                 import time as _time
-
-                self.searcher._deadline = _time.perf_counter() + time_budget * 0.5
+                self.searcher._deadline = _time.perf_counter() + rat_time  # <-- was time_budget * 0.5
                 skip_val = -self.searcher._negamax(
                     skip_board,
                     max(1, self.searcher.max_depth - 1),

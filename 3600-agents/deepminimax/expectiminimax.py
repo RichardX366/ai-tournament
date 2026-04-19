@@ -15,6 +15,9 @@ from game.enums import (
     loc_after_direction,
 )
 
+_rat_xy = None
+_rat_prob = 0.0
+
 # ── constants ─────────────────────────────────────────────────────────────────
 _INF = float("inf")
 _CARPET_PTS = [0, -1, 2, 4, 6, 10, 15, 21]
@@ -112,6 +115,12 @@ def _order_moves_full(board, moves, evaluate_fn):
                 else 0.0
             )
         score = -evaluate_fn(child) + 0.55 * points
+        if _rat_xy is not None and _rat_prob > 0.20:
+            rx, ry = _rat_xy
+            child_loc = child.player_worker.get_location()
+            cx, cy = child_loc
+            rat_dist = abs(cx - rx) + abs(cy - ry)
+            score += 0.3 * _rat_prob * (1.0 / (rat_dist + 1))
         scored.append((score, move))
     scored.sort(key=lambda t: t[0], reverse=True)
     ordered = [move for _, move in scored]
@@ -276,9 +285,7 @@ def _evaluate(board: Board):
     player_moves = board.get_valid_moves(enemy=False, exclude_search=True)
     opponent_moves = board.get_valid_moves(enemy=True, exclude_search=True)
     player_prime_count = sum(1 for mv in player_moves if mv.move_type == MoveType.PRIME)
-    opponent_prime_count = sum(
-        1 for mv in opponent_moves if mv.move_type == MoveType.PRIME
-    )
+    opponent_prime_count = sum(1 for mv in opponent_moves if mv.move_type == MoveType.PRIME)
 
     # Primed-run ownership for best carpet
     player_best_carpet, opponent_best_carpet = _best_carpet_for_sides(
@@ -350,11 +357,22 @@ def _evaluate(board: Board):
         )
     else:
         midgame_factors = 0.0
+    
+    rat_pull = 0.0
+    if _rat_xy is not None and _rat_prob > 0.20:
+        rx, ry = _rat_xy
+        p_dist = abs(player_x - rx) + abs(player_y - ry)
+        o_dist = abs(opponent_x - rx) + abs(opponent_y - ry)
+        rat_pull = 0.25 * _rat_prob * (o_dist - p_dist)
+        # Positive when we're closer to the rat than opponent
+    else:
+        rat_pull = 0.0
 
     return (
         score_diff
         + 0.50 * (player_best_carpet - opponent_best_carpet)
         + midgame_factors
+        + rat_pull
     )
 
 
@@ -479,6 +497,8 @@ class Expectiminimax:
         self._nodes = 0
         self._tt: dict = {}  # {board_key: (score, depth, flag, best_move_key)}
         self._tt_hits = 0
+        self._rat_xy = None   # (x, y) best guess
+        self._rat_prob = 0.0
 
     def search(self, board, rat_belief, time_budget=1.0):
         deadline = time.perf_counter() + time_budget
@@ -521,6 +541,13 @@ class Expectiminimax:
         effective_max = min(self.max_depth, max(1, turns_remaining - 1))
 
         best_moves = []
+
+        global _rat_xy, _rat_prob
+        if rat_belief is not None:
+            _rat_xy = rat_belief.weighted_target()
+            _rat_prob = rat_belief.best_prob
+        else:
+            _rat_xy, _rat_prob = None, 0.0
 
         # Iterative deepening with PVS
         for depth in range(1, effective_max + 1):

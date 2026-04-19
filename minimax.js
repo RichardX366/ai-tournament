@@ -345,18 +345,44 @@
       let bestScore = cur.val * Math.exp(-(cumDist + cur.d) / 4);
       for (let j = 0; j < runs.length; j++) {
         if (j === targetIdx || visited.has(j)) continue;
-        const { ep1: mEp1, val1: mVal1, ep2: mEp2, val2: mVal2, inner1, inner2 } = runs[j];
-        const d1 = mEp1 !== null ? Math.abs(mEp1[0] - wx) + Math.abs(mEp1[1] - wy) : Infinity;
-        const d2 = mEp2 !== null ? Math.abs(mEp2[0] - wx) + Math.abs(mEp2[1] - wy) : Infinity;
+        const {
+          ep1: mEp1,
+          val1: mVal1,
+          ep2: mEp2,
+          val2: mVal2,
+          inner1,
+          inner2,
+        } = runs[j];
+        const d1 =
+          mEp1 !== null
+            ? Math.abs(mEp1[0] - wx) + Math.abs(mEp1[1] - wy)
+            : Infinity;
+        const d2 =
+          mEp2 !== null
+            ? Math.abs(mEp2[0] - wx) + Math.abs(mEp2[1] - wy)
+            : Infinity;
         const dNear = d1 <= d2 ? d1 : d2;
         const valM = d1 <= d2 ? mVal1 : mVal2;
         const exitPt = d1 <= d2 ? inner2 : inner1;
         if (dNear === Infinity || valM === null) continue;
-        const exitR = closestEndpoint(exitPt[0], exitPt[1], ep1, val1, ep2, val2);
+        const exitR = closestEndpoint(
+          exitPt[0],
+          exitPt[1],
+          ep1,
+          val1,
+          ep2,
+          val2,
+        );
         if (dNear + 1 + exitR.d >= cur.d) continue;
         const mScore = valM * Math.exp(-(cumDist + dNear) / 4);
         visited.add(j);
-        const child = bestPathTo(exitPt[0], exitPt[1], targetIdx, visited, cumDist + dNear + 1);
+        const child = bestPathTo(
+          exitPt[0],
+          exitPt[1],
+          targetIdx,
+          visited,
+          cumDist + dNear + 1,
+        );
         visited.delete(j);
         const total = mScore + child.score;
         if (total > bestScore) {
@@ -521,6 +547,40 @@
   function orderMovesFast(board, moves) {
     const [px, py] = board.player_worker.get_location();
     const primed = board._primed_mask;
+    const blocked = board._blocked_mask;
+    const carpet = board._carpet_mask;
+    const occupied = blocked | primed | carpet;
+
+    // Edge-count plain move scoring: rank directions by open squares on that edge
+    const edgeCounts = {
+      [Direction.UP]: 0,
+      [Direction.DOWN]: 0,
+      [Direction.LEFT]: 0,
+      [Direction.RIGHT]: 0,
+    };
+    for (let x = 0; x < 8; x++) {
+      if ((occupied & bitAt(x, 0)) === 0n) edgeCounts[Direction.UP]++;
+      if ((occupied & bitAt(x, 7)) === 0n) edgeCounts[Direction.DOWN]++;
+    }
+    for (let y = 0; y < 8; y++) {
+      if ((occupied & bitAt(0, y)) === 0n) edgeCounts[Direction.LEFT]++;
+      if ((occupied & bitAt(7, y)) === 0n) edgeCounts[Direction.RIGHT]++;
+    }
+    const scoreSlots = [1.5, 1.0, 0.5, 0.0];
+    const sortedDirs = DIRECTIONS.slice().sort(
+      (a, b) => edgeCounts[b] - edgeCounts[a],
+    );
+    const plainScore = {};
+    let i = 0;
+    while (i < 4) {
+      let j = i;
+      while (j < 4 && edgeCounts[sortedDirs[j]] === edgeCounts[sortedDirs[i]])
+        j++;
+      const groupScore = scoreSlots[j - 1];
+      for (let k = i; k < j; k++) plainScore[sortedDirs[k]] = groupScore;
+      i = j;
+    }
+
     const scored = moves.map((mv) => {
       let score = 0;
       if (mv.move_type === MoveType.CARPET) {
@@ -545,6 +605,8 @@
         ) {
           score += 4;
         }
+      } else {
+        score = plainScore[mv.direction] ?? 0;
       }
       return { score, mv };
     });

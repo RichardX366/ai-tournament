@@ -219,8 +219,16 @@ def _best_carpet_for_sides(board, player_loc, opp_loc):
         ep2 = None if (b2 and rl == 2) else ((fb2x, fb2y) if b2 else (x2, y2))
         if ep1 is None and ep2 is None:
             return
-        val1 = None if ep1 is None else (_CARPET_PTS[min(rl - 1, 7)] if b1 else _CARPET_PTS[min(rl, 7)])
-        val2 = None if ep2 is None else (_CARPET_PTS[min(rl - 1, 7)] if b2 else _CARPET_PTS[min(rl, 7)])
+        val1 = (
+            None
+            if ep1 is None
+            else (_CARPET_PTS[min(rl - 1, 7)] if b1 else _CARPET_PTS[min(rl, 7)])
+        )
+        val2 = (
+            None
+            if ep2 is None
+            else (_CARPET_PTS[min(rl - 1, 7)] if b2 else _CARPET_PTS[min(rl, 7)])
+        )
         runs.append((ep1, val1, ep2, val2, (fb1x, fb1y), (fb2x, fb2y)))
 
     # Horizontal runs — endpoints are squares just outside the run
@@ -274,8 +282,16 @@ def _best_carpet_for_sides(board, player_loc, opp_loc):
         for j, (m_ep1, m_val1, m_ep2, m_val2, m_inner1, m_inner2) in enumerate(runs):
             if j == target_idx or j in visited:
                 continue
-            d1 = (abs(m_ep1[0] - wx) + abs(m_ep1[1] - wy)) if m_ep1 is not None else float("inf")
-            d2 = (abs(m_ep2[0] - wx) + abs(m_ep2[1] - wy)) if m_ep2 is not None else float("inf")
+            d1 = (
+                (abs(m_ep1[0] - wx) + abs(m_ep1[1] - wy))
+                if m_ep1 is not None
+                else float("inf")
+            )
+            d2 = (
+                (abs(m_ep2[0] - wx) + abs(m_ep2[1] - wy))
+                if m_ep2 is not None
+                else float("inf")
+            )
             if d1 <= d2:
                 d_near, val_m, exit_pt = d1, m_val1, m_inner2
             else:
@@ -620,25 +636,6 @@ class Expectiminimax:
             if not done:
                 break
 
-        last_3: list[tuple[Move, float]] = (
-            best_moves[-3:] if len(best_moves) >= 3 else best_moves
-        )
-
-        if last_3:
-            summary = {}
-            for idx, (mv, val) in enumerate(last_3):
-                mk = _move_key(mv)
-                if mk in summary:
-                    count, _, _ = summary[mk]
-                    summary[mk] = (count + 1, idx, (mv, val))
-                else:
-                    summary[mk] = (1, idx, (mv, val))
-
-                _, _, (best_move, best_value) = max(
-                    summary.values(),
-                    key=lambda item: (item[0], item[1]),  # most common, else deepest
-                )
-
         return best_move, best_value
 
     def _negamax(self, board, depth, alpha, beta):
@@ -700,14 +697,9 @@ class Expectiminimax:
             if i == 0:
                 val = -self._negamax(child, depth - 1, -beta, -alpha)
             else:
-                # LMR: reduce depth for late moves at sufficient depth
-                reduce = 1 if (i >= 3 and depth >= 3) else 0
-                val = -self._negamax(child, depth - 1 - reduce, -alpha - 0.01, -alpha)
-                if val > alpha:
-                    # Re-search at full depth
-                    val = -self._negamax(child, depth - 1, -alpha - 0.01, -alpha)
-                    if val > alpha and val < beta:
-                        val = -self._negamax(child, depth - 1, -beta, -alpha)
+                val = -self._negamax(child, depth - 1, -alpha - 0.01, -alpha)
+                if val > alpha and val < beta:
+                    val = -self._negamax(child, depth - 1, -beta, -alpha)
 
             if val > best:
                 best = val

@@ -253,7 +253,10 @@ def generate_spawns(board: Board):
 
 
 def from_board_array(
-    board: list[list[str]], a_pos: tuple[int, int], b_pos: tuple[int, int]
+    board: list[list[str]],
+    a_pos: tuple[int, int],
+    b_pos: tuple[int, int],
+    turn_number: int,
 ) -> Board:
     """
     Utility function to create a Board object from a 2D array representation.
@@ -284,5 +287,10 @@ def from_board_array(
                 new_board.set_cell((x, y), Cell.BLOCKED)
     new_board.player_worker.position = a_pos
     new_board.opponent_worker.position = b_pos
+    b_turns = turn_number // 2
+    a_turns = turn_number - b_turns
+    new_board.player_worker.turns_left = MAX_TURNS_PER_PLAYER - a_turns
+    new_board.opponent_worker.turns_left = MAX_TURNS_PER_PLAYER - b_turns
+    new_board.turn_count = turn_number
 
     return new_board

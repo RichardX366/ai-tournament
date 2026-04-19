@@ -45,6 +45,9 @@ def main():
     print(f"A Time Left: {worker_a.time_left:.2f} seconds")
     print(f"B Time Left: {worker_b.time_left:.2f} seconds")
 
+    print(f"Message A: {message_a}")
+    print(f"Message B: {message_b}")
+
     records_dir = os.path.join(play_directory, "matches")
     os.makedirs(records_dir, exist_ok=True)
     i = 0

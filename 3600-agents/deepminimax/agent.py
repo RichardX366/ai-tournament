@@ -27,8 +27,9 @@ class PlayerAgent:
         if transition_matrix is not None:
             self.rat_belief = RatBelief(transition_matrix)
 
-        self.searcher = Expectiminimax(max_depth=10)
+        self.searcher = Expectiminimax(max_depth=12)
         self.turn_number = 0
+        self.rat = []
 
     def play(
         self,
@@ -42,6 +43,7 @@ class PlayerAgent:
         # ── Update rat belief ─────────────────────────────────────────────────
         if self.rat_belief is not None:
             self.rat_belief.update(board, int(noise), int(est_distance))
+            self.rat += [self.rat_belief.belief]
 
         # ── Time management (adaptive) ────────────────
         remaining = max(0.0, float(time_left()))
@@ -320,15 +322,22 @@ class PlayerAgent:
 
     def commentate(self):
         if self.rat_belief is not None:
-            best_pos = self.rat_belief.best_guess()
-            best_prob = float(self.rat_belief.belief.max())
-            best_ev = self.rat_belief.ev_search(best_pos)
-            nodes = self.searcher._nodes
-            tt_hits = self.searcher._tt_hits
-            tt_size = len(self.searcher._tt)
-            return (
-                f"Expectiminimax agent | "
-                f"Rat: {best_pos} ({best_prob:.1%}, EV={best_ev:.2f}) | "
-                f"Nodes: {nodes}, TT hits: {tt_hits}, TT size: {tt_size}"
-            )
+
+            def fmt_val(v):
+                v = round(float(v), 2)
+                if v == 0.0:
+                    return "0"
+                s = f"{v:.2f}"
+                if s.startswith("0."):
+                    return s[1:]
+                if s.startswith("-0."):
+                    return "-" + s[2:]
+                return s
+
+            def fmt_list(x):
+                if isinstance(x, list):
+                    return "[" + ",".join(fmt_list(v) for v in x) + "]"
+                return fmt_val(x)
+
+            return "[" + ",".join(fmt_list(b.tolist()) for b in self.rat) + "]"
         return "Expectiminimax agent"

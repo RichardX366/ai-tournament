@@ -30,6 +30,7 @@ class PlayerAgent:
         self.searcher = Expectiminimax(max_depth=12)
         self.turn_number = 0
         self.rat = []
+        self.stuck = []
 
     def play(
         self,
@@ -49,7 +50,7 @@ class PlayerAgent:
         remaining = max(0.0, float(time_left()))
         turns_left = max(1, board.player_worker.turns_left)
         usable = max(0.15, remaining - 5.0)
-        time_budget = max(0.15, 2 * usable / turns_left)
+        time_budget = max(0.15, 4 * usable / turns_left)
 
         # It is the last turn and you are A
         if (
@@ -99,6 +100,8 @@ class PlayerAgent:
                 ]
 
             opponent_moves = self.get_next_n_enemy_moves(board, time_budget, n=2)
+
+            self.stuck.append(self.turn_number)
 
             move_sequences = []
 
@@ -347,7 +350,7 @@ class PlayerAgent:
                 if self.searcher.timeout_turns
                 else "[]"
             )
-            return rat_str + " timeouts:" + timeout_str
+            return rat_str + " timeouts:" + timeout_str + " stuck:" + str(self.stuck)
         timeout_str = (
             str(self.searcher.timeout_turns) if self.searcher.timeout_turns else "[]"
         )

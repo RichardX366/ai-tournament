@@ -82,7 +82,11 @@ class PlayerAgent:
                     if cell == Cell.CARPET:
                         surroundingCarpet += 1
 
-        if surroundingTiles > 0 and surroundingCarpet / surroundingTiles > 0.65:
+        if (
+            turns_left > 6
+            and surroundingTiles > 0
+            and surroundingCarpet / surroundingTiles > 0.65
+        ):
             player_moves_1 = board.get_valid_moves()
             prime_moves = [m for m in player_moves_1 if m.move_type == MoveType.PRIME]
             carpet_moves = [

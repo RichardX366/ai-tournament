@@ -49,7 +49,7 @@ class PlayerAgent:
         remaining = max(0.0, float(time_left()))
         turns_left = max(1, board.player_worker.turns_left)
         usable = max(0.15, remaining - 5.0)
-        time_budget = min(5.5, max(0.15, 1.5 * usable / turns_left))
+        time_budget = max(0.15, 2 * usable / turns_left)
 
         # It is the last turn and you are A
         if (
@@ -220,7 +220,7 @@ class PlayerAgent:
                 return Move.search(search_xy)
 
             # If we tie by moving or passing, and the search EV is positive, search
-            if best_val == 0 and passing_best_value == 0 and search_ev > 0:
+            if best_val == 0 and passing_best_value == 0 and search_ev > 1.6:
                 return Move.search(search_xy)
 
         return best_move
@@ -250,7 +250,7 @@ class PlayerAgent:
             search_xy, search_ev = self.rat_belief.best_search_target()
             if best_val < 0:
                 return Move.search(search_xy)
-            elif best_val == 0 and search_ev > 0:
+            elif best_val == 0 and search_ev > 1.6:
                 return Move.search(search_xy)
 
         return best_move
@@ -297,7 +297,7 @@ class PlayerAgent:
             search_xy, search_ev = self.rat_belief.best_search_target()
             miss_ev = self.rat_belief.new_ev_if_miss()
             search_ev -= (
-                miss_ev * (1 - self.rat_belief.belief.max()) * 0.3
+                miss_ev * (1 - self.rat_belief.belief.max()) * 0.3 + 0.3
             )  # Compare against the EV of not searching at all
 
             if search_ev > 0:
@@ -342,7 +342,13 @@ class PlayerAgent:
                 return fmt_val(x)
 
             rat_str = "[" + ",".join(fmt_list(b.tolist()) for b in self.rat) + "]"
-            timeout_str = str(self.searcher.timeout_turns) if self.searcher.timeout_turns else "[]"
+            timeout_str = (
+                str(self.searcher.timeout_turns)
+                if self.searcher.timeout_turns
+                else "[]"
+            )
             return rat_str + " timeouts:" + timeout_str
-        timeout_str = str(self.searcher.timeout_turns) if self.searcher.timeout_turns else "[]"
+        timeout_str = (
+            str(self.searcher.timeout_turns) if self.searcher.timeout_turns else "[]"
+        )
         return "Expectiminimax agent timeouts:" + timeout_str

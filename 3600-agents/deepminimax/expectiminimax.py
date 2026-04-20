@@ -698,12 +698,22 @@ class Expectiminimax:
                 continue
             child.reverse_perspective()
 
+            # Late Move Reductions: reduce depth for later quiet moves
+            lmr = i >= 4 and depth >= 4 and mv.move_type == MoveType.PLAIN
+            reduction = (2 if i >= 8 else 1) if lmr else 0
+
             if i == 0:
                 val = -self._negamax(child, depth - 1, -beta, -alpha)
             else:
-                val = -self._negamax(child, depth - 1, -alpha - 0.01, -alpha)
-                if val > alpha and val < beta:
-                    val = -self._negamax(child, depth - 1, -beta, -alpha)
+                val = -self._negamax(
+                    child, depth - 1 - reduction, -alpha - 0.01, -alpha
+                )
+                if val > alpha:
+                    # Re-search at full depth when reduced search raises alpha
+                    if reduction:
+                        val = -self._negamax(child, depth - 1, -alpha - 0.01, -alpha)
+                    if val > alpha and val < beta:
+                        val = -self._negamax(child, depth - 1, -beta, -alpha)
 
             if val > best:
                 best = val

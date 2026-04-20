@@ -550,12 +550,15 @@ class Expectiminimax:
         self._nodes = 0
         self._tt: dict = {}  # {board_key: (score, depth, flag, best_move_key)}
         self._tt_hits = 0
+        self.timeout_turns: List[int] = []
+        self._timed_out: bool = False
 
     def search(self, board, time_budget=1.0):
         deadline = time.perf_counter() + time_budget
         self._deadline = deadline
         self._nodes = 0
         self._tt_hits = 0
+        self._timed_out = False
 
         # Keep TT across searches for cross-turn hits, but cap size
         if len(self._tt) > _TT_MAX_SIZE:
@@ -687,6 +690,7 @@ class Expectiminimax:
 
         for i, mv in enumerate(ordered):
             if time.perf_counter() >= self._deadline:
+                self._timed_out = True
                 break
 
             child = board.forecast_move(mv, check_ok=True)

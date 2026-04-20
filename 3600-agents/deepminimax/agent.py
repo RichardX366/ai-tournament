@@ -286,6 +286,8 @@ class PlayerAgent:
             board,
             time_budget,
         )
+        if self.searcher._timed_out:
+            self.searcher.timeout_turns.append(self.turn_number)
 
         # ── Rat search decision (skip-turn negamax comparison) ────────
         # Search = skip a turn positionally but gain search_ev in expectation.
@@ -339,5 +341,8 @@ class PlayerAgent:
                     return "[" + ",".join(fmt_list(v) for v in x) + "]"
                 return fmt_val(x)
 
-            return "[" + ",".join(fmt_list(b.tolist()) for b in self.rat) + "]"
-        return "Expectiminimax agent"
+            rat_str = "[" + ",".join(fmt_list(b.tolist()) for b in self.rat) + "]"
+            timeout_str = str(self.searcher.timeout_turns) if self.searcher.timeout_turns else "[]"
+            return rat_str + " timeouts:" + timeout_str
+        timeout_str = str(self.searcher.timeout_turns) if self.searcher.timeout_turns else "[]"
+        return "Expectiminimax agent timeouts:" + timeout_str
